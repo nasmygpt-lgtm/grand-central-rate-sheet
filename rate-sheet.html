@@ -146,6 +146,11 @@
     font-size: 13px;
   }
 
+  /* remove the browser's automatic URL/date header & footer from printed pages */
+  @page {
+    margin: 12mm;
+  }
+
   /* print / PDF: hide all interactive controls */
   @media print {
     .toolbar, .table-actions, th.act, td.act { display: none !important; }
@@ -157,8 +162,9 @@
 <body>
 
 <div class="toolbar no-print">
-  <button class="secondary" onclick="window.print()">🖨 Print / Save as PDF</button>
-  <span class="hint">Tip: click any cell to edit its text. Use “Remove” to delete a row and “+ Add Row” to add one.</span>
+  <button onclick="downloadPDF()">⬇ Download PDF (clean, no URL)</button>
+  <button class="secondary" onclick="window.print()">🖨 Print</button>
+  <span class="hint">Tip: use “Download PDF” for a clean file with no web address. Click any cell to edit. Use “Remove” / “+ Add Row” to manage rows.</span>
 </div>
 
 <header>
@@ -260,7 +266,35 @@
   Rates subject to availability and confirmation at the time of booking. For reservations and queries, please contact your allocated Reservations / Sales contact.
 </footer>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script>
+  // Generate a clean PDF (no browser URL/date header or footer)
+  function downloadPDF() {
+    var toolbar = document.querySelector('.toolbar');
+    var addBtns = document.querySelectorAll('.table-actions');
+    var actCells = document.querySelectorAll('.act');
+    // hide interactive controls so they don't appear in the PDF
+    if (toolbar) toolbar.style.display = 'none';
+    addBtns.forEach(function (el) { el.style.display = 'none'; });
+    actCells.forEach(function (el) { el.style.display = 'none'; });
+
+    var opt = {
+      margin:       [10, 10, 10, 10],
+      filename:     'Grand-Central-Hotel-Rate-Sheet.pdf',
+      image:        { type: 'jpeg', quality: 0.98 },
+      html2canvas:  { scale: 2, useCORS: true },
+      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      pagebreak:    { mode: ['avoid-all', 'css', 'legacy'] }
+    };
+
+    html2pdf().set(opt).from(document.body).save().then(function () {
+      // restore controls after PDF is generated
+      if (toolbar) toolbar.style.display = '';
+      addBtns.forEach(function (el) { el.style.display = ''; });
+      actCells.forEach(function (el) { el.style.display = ''; });
+    });
+  }
+
   // Remove the row that the clicked button belongs to
   function removeRow(btn) {
     var row = btn.closest('tr');
