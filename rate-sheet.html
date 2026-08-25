@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grand Central Hotel — Rate Sheet (Editable)</title>
+<style>
+  :root {
+    --navy: #1f3a5f;
+    --navy-dark: #14294a;
+    --gold: #b8860b;
+    --cream: #fbf3e0;
+    --border: #c9c9c9;
+    --row-alt: #f6f6f6;
+    --danger: #b02a2a;
+    --danger-hover: #8f1f1f;
+    --green: #2e7d32;
+    --green-hover: #1f5c23;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Times New Roman", Georgia, serif;
+    color: #222;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 32px 24px 80px;
+    background: #fff;
+  }
+  header { text-align: center; margin-bottom: 8px; }
+  h1.hotel {
+    color: var(--gold);
+    font-size: 26px;
+    letter-spacing: 1px;
+    margin: 0;
+  }
+  h1.title {
+    color: var(--navy);
+    font-size: 40px;
+    margin: 2px 0 4px;
+    letter-spacing: 1px;
+  }
+  .valid { font-style: italic; color: #555; margin: 0 0 18px; }
+  hr.rule { border: none; border-top: 2px solid var(--navy); margin: 18px 0 26px; }
+
+  h2.section {
+    color: var(--navy);
+    font-size: 20px;
+    border-left: 4px solid var(--gold);
+    padding-left: 10px;
+    margin: 34px 0 6px;
+  }
+  p.note { font-style: italic; color: #555; font-size: 13px; margin: 4px 0; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+    font-size: 14px;
+  }
+  th {
+    background: var(--navy);
+    color: #fff;
+    padding: 10px 12px;
+    text-align: center;
+    font-weight: bold;
+    border: 1px solid var(--navy-dark);
+  }
+  td {
+    padding: 9px 12px;
+    border: 1px solid var(--border);
+    text-align: center;
+  }
+  td:first-child { font-weight: bold; text-align: left; }
+  tbody tr:nth-child(even) { background: var(--row-alt); }
+
+  /* cream-highlighted rows for the events table */
+  table.events tbody tr:nth-child(odd) { background: var(--cream); }
+  table.events tbody tr:nth-child(even) { background: #fff; }
+
+  /* editable cells */
+  td[contenteditable="true"] { cursor: text; }
+  td[contenteditable="true"]:focus {
+    outline: 2px solid var(--gold);
+    background: #fffdf3;
+  }
+
+  /* action column */
+  th.act, td.act { width: 90px; }
+  button.remove {
+    background: var(--danger);
+    color: #fff;
+    border: none;
+    padding: 5px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: Arial, sans-serif;
+    font-size: 12px;
+  }
+  button.remove:hover { background: var(--danger-hover); }
+
+  .table-actions { margin-top: 8px; }
+  button.add {
+    background: var(--green);
+    color: #fff;
+    border: none;
+    padding: 7px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: Arial, sans-serif;
+    font-size: 13px;
+  }
+  button.add:hover { background: var(--green-hover); }
+
+  /* toolbar */
+  .toolbar {
+    position: sticky;
+    top: 0;
+    background: #fff;
+    border-bottom: 1px solid var(--border);
+    padding: 10px 0;
+    margin-bottom: 12px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    z-index: 10;
+  }
+  .toolbar button {
+    font-family: Arial, sans-serif;
+    font-size: 13px;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 1px solid var(--navy);
+    background: var(--navy);
+    color: #fff;
+  }
+  .toolbar button.secondary { background: #fff; color: var(--navy); }
+  .toolbar .hint { font-family: Arial, sans-serif; font-size: 12px; color: #666; align-self: center; }
+
+  footer.doc-note {
+    margin-top: 40px;
+    border-top: 2px solid var(--navy);
+    padding-top: 14px;
+    font-style: italic;
+    color: #555;
+    font-size: 13px;
+  }
+
+  /* print / PDF: hide all interactive controls */
+  @media print {
+    .toolbar, .table-actions, th.act, td.act { display: none !important; }
+    body { padding: 0; }
+    td[contenteditable="true"]:focus { outline: none; background: transparent; }
+  }
+</style>
+</head>
+<body>
+
+<div class="toolbar no-print">
+  <button class="secondary" onclick="window.print()">🖨 Print / Save as PDF</button>
+  <span class="hint">Tip: click any cell to edit its text. Use “Remove” to delete a row and “+ Add Row” to add one.</span>
+</div>
+
+<header>
+  <h1 class="hotel">GRAND CENTRAL HOTEL</h1>
+  <h1 class="title">RATE SHEET</h1>
+  <p class="valid" contenteditable="true">Valid: September 2026 – January 2027</p>
+</header>
+<hr class="rule">
+
+<!-- ============ DELUXE ROOM RATES ============ -->
+<h2 class="section">Deluxe Room Rates</h2>
+<table id="deluxe">
+  <thead>
+    <tr>
+      <th>Month</th>
+      <th>Bed &amp; Breakfast (BB)</th>
+      <th>Room Only (RO)</th>
+      <th>Non-Refundable (NRF)</th>
+      <th>Release Period</th>
+      <th class="act">Action</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td contenteditable="true">September 2026</td><td contenteditable="true">AED 135 + 15 TD</td><td contenteditable="true">AED 125 + 15 TD</td><td contenteditable="true">5%</td><td contenteditable="true">1 Day</td><td class="act"><button class="remove" onclick="removeRow(this)">Remove</button></td></tr>
+    <tr><td contenteditable="true">October 2026</td><td contenteditable="true">AED 275 + 15 TD</td><td contenteditable="true">AED 250 + 15 TD</td><td contenteditable="true">5%</td><td contenteditable="true">3 Days</td><td class="act"><button class="remove" onclick="removeRow(this)">Remove</button></td></tr>
+    <tr><td contenteditable="true">November 2026</td><td contenteditable="true">AED 290 + 15 TD</td><td contenteditable="true">AED 265 + 15 TD</td><td contenteditable="true">5%</td><td contenteditable="true">3 Days</td><td class="act"><button class="remove" onclick="removeRow(this)">Remove</button></td></tr>
+    <tr><td contenteditable="true">December 2026</td><td contenteditable="true">AED 290 + 15 TD</td><td contenteditable="true">AED 265 + 15 TD</td><td contenteditable="true">5%</td><td contenteditable="true">3 Days</td><td class="act"><button class="remove" onclick="removeRow(this)">Remove</button></td></tr>
+    <tr><td contenteditable="true">January 2027</td><td contenteditable="true">AED 290 + 15 TD</td><td contenteditable="true">AED 265 + 15 TD</td><td contenteditable="true">5%</td><td contenteditable="true">3 Days</td><td class="act"><button class="remove" onclick="removeRow(this)">Remove</button></td></tr>
+  </tbody>
+</table>
+<div class="table-actions"><button class="add" onclick="addRow('deluxe', 5)">+ Add Row</button></div>
+<p class="note">Rates are quoted in AED, per room per night. TD = Tourism Dirham.</p>
+<p class="note">NRF (Non-Refundable) rate: 5% discount off the above BB / RO rates, fully pre-paid and non-refundable.</p>
+<p class="note">Release Period: number of days before arrival by which the booking must be confirmed, failing which the allocation is released.</p>
+
+<!-- ============ EVENT & PEAK SUPPLEMENTS ============ -->
+<h2 class="section">Event &amp; Peak Period Supplements</h2>
+<p class="note">The below supplements apply on top of the room rates above, for the specified dates only.</p>
+<table id="events" class="events">
+  <thead>
+    <tr>
+      <th>Event / Period</th>
+      <th>Dates</th>
+      <th>Supplement (per room/night unless noted)</th>
+      <th class="act">Action</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td contenteditable="true">Diwali</td><td contenteditable="true">08 Nov – 12 Nov 2026</td><td contenteditable="true">AED 60</td><td class="act"><button class="remove" onclick="removeRow(this)">Remove</button></td></tr>
+    <tr><td contenteditable="true">Big 5 Global</td><td contenteditable="true">23 Nov – 26 Nov 2026</td><td contenteditable="true">AED 75</td><td class="act"><button class="remove" onclick="removeRow(this)">Remove</button></td></tr>
+    <tr><td contenteditable="true">New Year</td><td contenteditable="true">29 Dec 2026 – 01 Jan 2027</td><td contenteditable="true">AED 300</td><td class="act"><button class="remove" onclick="removeRow(this)">Remove</button></td></tr>
+    <tr><td contenteditable="true">World Health Expo (WHX)</td><td contenteditable="true">25 Jan – 28 Jan 2027</td><td contenteditable="true">AED 200</td><td class="act"><button class="remove" onclick="removeRow(this)">Remove</button></td></tr>
+    <tr><td contenteditable="true">Gulf Food</td><td contenteditable="true">15 Mar – 19 Mar 2027</td><td contenteditable="true">AED 200</td><td class="act"><button class="remove" onclick="removeRow(this)">Remove</button></td></tr>
+    <tr><td contenteditable="true">Eid Al Fitr</td><td contenteditable="true">10 Mar – 12 Mar 2027</td><td contenteditable="true">AED 50</td><td class="act"><button class="remove" onclick="removeRow(this)">Remove</button></td></tr>
+    <tr><td contenteditable="true">Eid Al Adha</td><td contenteditable="true">16 May – 18 May 2027</td><td contenteditable="true">AED 50</td><td class="act"><button class="remove" onclick="removeRow(this)">Remove</button></td></tr>
+  </tbody>
+</table>
+<div class="table-actions"><button class="add" onclick="addRow('events', 3)">+ Add Row</button></div>
+
+<!-- ============ EXTRA BED & CHILD POLICY ============ -->
+<h2 class="section">Extra Bed &amp; Child Policy</h2>
+<table id="extrabed">
+  <thead>
+    <tr>
+      <th>Item</th>
+      <th>Rate / Policy</th>
+      <th class="act">Action</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td contenteditable="true">Extra Bed - September 2026</td><td contenteditable="true">AED 95 per night</td><td class="act"><button class="remove" onclick="removeRow(this)">Remove</button></td></tr>
+    <tr><td contenteditable="true">Extra Bed - October 2026 to January 2027</td><td contenteditable="true">AED 135 per night (no discount applicable)</td><td class="act"><button class="remove" onclick="removeRow(this)">Remove</button></td></tr>
+    <tr><td contenteditable="true">Child below 6 years</td><td contenteditable="true">Free of charge</td><td class="act"><button class="remove" onclick="removeRow(this)">Remove</button></td></tr>
+    <tr><td contenteditable="true">CNB (Child No Bed)</td><td contenteditable="true">AED 25 per night</td><td class="act"><button class="remove" onclick="removeRow(this)">Remove</button></td></tr>
+  </tbody>
+</table>
+<div class="table-actions"><button class="add" onclick="addRow('extrabed', 2)">+ Add Row</button></div>
+
+<!-- ============ CANCELLATION POLICY ============ -->
+<h2 class="section">Cancellation Policy</h2>
+<table id="cancellation">
+  <thead>
+    <tr>
+      <th>Period</th>
+      <th>Cancellation Deadline</th>
+      <th>Penalty</th>
+      <th class="act">Action</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td contenteditable="true">September 2026</td><td contenteditable="true">2 days before arrival</td><td contenteditable="true">1 night penalty inside this window</td><td class="act"><button class="remove" onclick="removeRow(this)">Remove</button></td></tr>
+    <tr><td contenteditable="true">October 2026 to January 2027</td><td contenteditable="true">7 days before arrival</td><td contenteditable="true">1 night penalty inside this window</td><td class="act"><button class="remove" onclick="removeRow(this)">Remove</button></td></tr>
+    <tr><td contenteditable="true">No Show</td><td contenteditable="true">-</td><td contenteditable="true">1 night penalty</td><td class="act"><button class="remove" onclick="removeRow(this)">Remove</button></td></tr>
+  </tbody>
+</table>
+<div class="table-actions"><button class="add" onclick="addRow('cancellation', 3)">+ Add Row</button></div>
+
+<footer class="doc-note" contenteditable="true">
+  Rates subject to availability and confirmation at the time of booking. For reservations and queries, please contact your allocated Reservations / Sales contact.
+</footer>
+
+<script>
+  // Remove the row that the clicked button belongs to
+  function removeRow(btn) {
+    var row = btn.closest('tr');
+    if (row) row.parentNode.removeChild(row);
+  }
+
+  // Add a blank editable row to a given table
+  function addRow(tableId, dataCols) {
+    var tbody = document.querySelector('#' + tableId + ' tbody');
+    var tr = document.createElement('tr');
+    for (var i = 0; i < dataCols; i++) {
+      var td = document.createElement('td');
+      td.setAttribute('contenteditable', 'true');
+      td.textContent = '';
+      tr.appendChild(td);
+    }
+    var actTd = document.createElement('td');
+    actTd.className = 'act';
+    actTd.innerHTML = '<button class="remove" onclick="removeRow(this)">Remove</button>';
+    tr.appendChild(actTd);
+    tbody.appendChild(tr);
+    // focus the first cell of the new row
+    tr.querySelector('td[contenteditable="true"]').focus();
+  }
+</script>
+
+</body>
+</html>
