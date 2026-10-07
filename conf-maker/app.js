@@ -1,6 +1,8 @@
 "use strict";
 
 const el = (id) => document.getElementById(id);
+let lastData = null;
+let lastNonRefundable = false;
 
 /* =========================================================================
    PARSER — turns pasted booking text into structured data
@@ -283,6 +285,96 @@ function render(data, nonRefundable) {
 }
 
 /* =========================================================================
+   EMAIL RENDER — same content but with INLINE styles so Outlook/Gmail keep
+   the table borders & formatting when pasted. (Outlook ignores <style> tags
+   and CSS classes, so every style must live on the element itself.)
+   ========================================================================= */
+const S = {
+  table: "border-collapse:collapse;width:100%;max-width:640px;margin:14px 0 20px;font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1a1a1a;",
+  th: "border:1px solid #c9c9c9;background:#f3ead3;color:#4a3c15;text-align:left;padding:8px 12px;font-weight:bold;width:34%;vertical-align:top;",
+  td: "border:1px solid #c9c9c9;padding:8px 12px;text-align:left;vertical-align:top;",
+  roomHeader: "background:#2e3a46;color:#e3c171;padding:8px 12px;font-weight:bold;font-family:Segoe UI,Arial,sans-serif;font-size:14px;margin:18px 0 0;",
+  badge: "background:#fff3cd;color:#7a5c00;font-weight:bold;padding:2px 8px;border-radius:4px;",
+  p: "font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1a1a1a;margin:0 0 12px;",
+  li: "font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1a1a1a;margin:0 0 8px;",
+  title: "font-family:Segoe UI,Arial,sans-serif;font-size:14px;font-weight:bold;margin:18px 0 8px;",
+  ovTitle: "font-family:Segoe UI,Arial,sans-serif;font-size:14px;font-weight:bold;color:#1a4a7a;margin:18px 0 8px;",
+};
+
+function trE(label, val) {
+  return `<tr><td style="${S.th}">${label}</td><td style="${S.td}">${val}</td></tr>`;
+}
+
+function rateEmail(r) {
+  const nightWord = r.nights === 1 ? "NIGHT" : "NIGHTS";
+  const line = r.extra > 0
+    ? `${num(r.rate)} + ${num(r.extra)} X ${r.nights} ${nightWord} = AED ${num((r.rate + r.extra) * r.nights)}`
+    : `${num(r.rate)} X ${r.nights} ${nightWord} = AED ${num(r.rate * r.nights)}`;
+  const total = r.extra > 0 ? (r.rate + r.extra) * r.nights : r.rate * r.nights;
+  return `${esc(line)}<br><strong>Total = AED ${num(total)}</strong>`;
+}
+
+function renderEmail(data, nonRefundable) {
+  const multi = data.rooms.length > 1;
+  let grand = 0;
+
+  const tables = data.rooms.map((r, i) => {
+    grand += (r.rate + r.extra) * r.nights;
+    const guest = (r.guests[0] || "").toUpperCase();
+    const nightsLabel = `${r.nights} ${r.nights === 1 ? "Night" : "Nights"}`;
+    const guestCount = r.adults ? `${r.adults} Adult${r.adults > 1 ? "s" : ""}` : "";
+    const header = multi ? `<div style="${S.roomHeader}">Room ${i + 1} of ${data.rooms.length}</div>` : "";
+    return `${header}
+      <table style="${S.table}" cellpadding="0" cellspacing="0" border="1">
+        ${trE("Hotel Confirmation", esc(data.confNumber))}
+        ${data.company ? trE("Company Name", esc(data.company.toUpperCase())) : ""}
+        ${trE("Guest Name", esc(guest))}
+        ${trE("Check In", esc(r.checkIn))}
+        ${trE("Check Out", esc(r.checkOut))}
+        ${trE("Duration of Stay", nightsLabel)}
+        ${trE("Room Type", esc(r.roomType))}
+        ${trE("Meal Plan", esc(r.meal))}
+        ${trE("Total Guests", esc(guestCount))}
+        ${trE("Rate per Night", rateEmail(r))}
+        ${trE("TD", `<span style="${S.badge}">TD Direct payment</span>`)}
+      </table>`;
+  }).join("");
+
+  const grandHtml = multi ? `<p style="${S.p}text-align:right;"><strong>Grand Total = AED ${num(grand)}</strong></p>` : "";
+
+  const nr = nonRefundable;
+  const notes = `
+    <p style="${S.title}">Additional Notes:</p>
+    <ul style="margin:0 0 16px;padding-left:18px;list-style:none;">
+      <li style="${S.li}">✔ <strong>Deposit Policy:</strong> A refundable deposit of AED 200 is required at check-in. This amount will be refunded upon check-out after room inspection, provided no damages or incidental charges apply.</li>
+      <li style="${S.li}">✔ <strong>Check-in/out Times:</strong> 14:00 (2 PM) / 12:00 (Noon)</li>
+      ${nr ? "" : `<li style="${S.li}">✔ <strong>Cancellation Policy:</strong> Free cancellation until 14 days before arrival. Late cancellations incur one night's charge.</li>
+      <li style="${S.li}">✔ <strong>Early Departure:</strong> 50% penalty charges applicable</li>
+      <li style="${S.li}">✔ <strong>Payment:</strong> Room charges to be settled 14 days before arrival</li>`}
+      <li style="${S.li}">✔ <strong>Parking:</strong> Basement paid parking available at AED 25 per day.</li>
+      <li style="${S.li}">✔ <strong>Visitor Policy:</strong> Only registered guests are permitted in the room. Any additional visitors beyond the booked occupancy will be subject to additional charges as per the hotel policy.</li>
+    </ul>`;
+
+  return `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1a1a1a;">
+    <p style="${S.p}">Dear Reservation Team,</p>
+    <p style="${S.p}">Greetings from Grand Central Hotel,</p>
+    <p style="${S.p}">We are pleased to confirm your reservation at Grand Central Deira, Dubai, as per the following details:</p>
+    ${tables}
+    ${grandHtml}
+    ${notes}
+    <p style="${S.ovTitle}">Grand Central Hotel – Quick Overview</p>
+    <ul style="margin:0 0 14px;padding-left:18px;">
+      <li style="${S.li}">⭐ <strong>Star Rating:</strong> Marketed as a 4 star property with 140 rooms. It's centrally located in Deira near Al Rigga Road. Muraqqabat Street - Deira - Dubai</li>
+      <li style="${S.li}">📍 <strong>Location:</strong> Just a 3–4 minute walk (230 m) to Al Rigga Metro Station, offering seamless access to Dubai's transit network and attractions like Deira City Centre and the Dubai Museum</li>
+    </ul>
+    <p style="${S.p}">Should you have any further concerns or feedback, please do not hesitate to reach out to us directly.</p>
+    <p style="${S.p}">Thank you,</p>
+    <p style="${S.p}">Kind Regards<br>Naseem Mohamed<br>Whatsapp: <a href="https://wa.me/971553440486" style="color:#1a7a3a;">https://wa.me/971553440486</a></p>
+    <p style="${S.p}">🌿 P Please don't print this email unless you really need to</p>
+  </div>`;
+}
+
+/* =========================================================================
    WIRING
    ========================================================================= */
 const EXAMPLE = `Greetings From Ghai Holidays !!!!!!!!!!!
@@ -314,8 +406,10 @@ function generate() {
   }
   if (!data.rooms.length) { setStatus("err", "No rooms detected. Check the text format."); return; }
   data.confNumber = el("confNumber").value.trim();
+  lastData = data;
+  lastNonRefundable = el("nonRefundable").checked;
   el("rawJson").textContent = JSON.stringify(data, null, 2);
-  el("confirmationOutput").innerHTML = render(data, el("nonRefundable").checked);
+  el("confirmationOutput").innerHTML = render(data, lastNonRefundable);
   el("resultCard").hidden = false;
   setStatus("ok", `✓ Detected ${data.rooms.length} room(s). Review below.`);
   el("resultCard").scrollIntoView({ behavior: "smooth" });
@@ -334,30 +428,35 @@ function setStatus(cls, msg) {
 /* ---- Copy / Download / Print ---- */
 const out = () => el("confirmationOutput");
 el("copyHtmlBtn").addEventListener("click", async () => {
+  // Build Outlook-safe HTML with INLINE styles so the table formatting survives the paste.
+  const emailHtml = lastData ? renderEmail(lastData, lastNonRefundable) : out().innerHTML;
+  const plain = out().innerText;
   try {
     await navigator.clipboard.write([new ClipboardItem({
-      "text/html": new Blob([out().innerHTML], { type: "text/html" }),
-      "text/plain": new Blob([out().innerText], { type: "text/plain" }),
+      "text/html": new Blob([emailHtml], { type: "text/html" }),
+      "text/plain": new Blob([plain], { type: "text/plain" }),
     })]);
     flash("copyHtmlBtn");
   } catch {
-    const r = document.createRange(); r.selectNodeContents(out());
+    // Fallback: render the inline-styled HTML into a temp element and copy via selection
+    const tmp = document.createElement("div");
+    tmp.style.position = "fixed"; tmp.style.left = "-9999px";
+    tmp.innerHTML = emailHtml;
+    document.body.appendChild(tmp);
+    const r = document.createRange(); r.selectNodeContents(tmp);
     const s = getSelection(); s.removeAllRanges(); s.addRange(r);
-    document.execCommand("copy"); flash("copyHtmlBtn");
+    document.execCommand("copy");
+    s.removeAllRanges(); document.body.removeChild(tmp);
+    flash("copyHtmlBtn");
   }
 });
 el("copyTextBtn").addEventListener("click", async () => {
   await navigator.clipboard.writeText(out().innerText); flash("copyTextBtn");
 });
 el("downloadBtn").addEventListener("click", () => {
-  const doc = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Confirmation</title>
-  <style>body{font-family:Segoe UI,Arial,sans-serif;color:#1a1a1a;max-width:720px;margin:30px auto;padding:0 20px;}
-  table{width:100%;border-collapse:collapse;margin:16px 0 22px;}th,td{border:1px solid #d7dde3;padding:9px 12px;text-align:left;vertical-align:top;}
-  th{background:#f3ead3;width:34%;}.rate-line{display:block;}.rate-total{font-weight:700;}
-  .td-badge{background:#fff3cd;color:#7a5c00;font-weight:700;padding:2px 8px;border-radius:5px;}
-  .room-header{background:#2e3a46;color:#e3c171;padding:8px 12px;border-radius:6px;margin:22px 0 8px;font-weight:700;}
-  ul.notes{list-style:none;padding:0;}ul.notes li{margin:0 0 8px;}.overview-title{color:#1a4a7a;font-weight:700;}a{color:#1a7a3a;}</style></head>
-  <body>${out().innerHTML}</body></html>`;
+  const body = lastData ? renderEmail(lastData, lastNonRefundable) : out().innerHTML;
+  const doc = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Grand Central Hotel Confirmation</title></head>
+  <body style="margin:24px;">${body}</body></html>`;
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([doc], { type: "text/html" }));
   a.download = "grand-central-confirmation.html"; a.click();
