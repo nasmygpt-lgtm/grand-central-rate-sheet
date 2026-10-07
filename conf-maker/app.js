@@ -455,5 +455,6 @@ function setOcr(cls, msg) {
   s.innerHTML = msg;
 }
 
-// start with example loaded
+// start with example loaded and year defaulted to the current year
 el("input").value = EXAMPLE;
+el("year").value = String(new Date().getFullYear());
