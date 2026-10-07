@@ -56,6 +56,15 @@ const MEAL_RE = /\b(BB|HB|FB|RO|AI|CP|MAP|AP|EP)\b/i;
 const EXTRA_BED_RE = /extra\s*bed/i;
 const CURRENT_YEAR = String(new Date().getFullYear());
 
+// A room row contains TWO dates (check-in + check-out). But depending on how the booking
+// was copied, the two dates may sit on the SAME line (columnar paste) or on SEPARATE lines
+// (copied from an HTML/email table, where each cell becomes its own line).
+// Strategy: scan the whole text left-to-right; every time we see a date that is a *check-in*
+// (i.e. the start of a new date-pair) we open a new room. The pairing rule: dates come in
+// order, so date #1 = check-in, date #2 = check-out of the SAME room, date #3 = next room's
+// check-in, and so on. Everything between a room's check-in and the next room's check-in
+// (names, room type, counts, cost) belongs to that room.
+
 function parseBooking(text, forcedYear) {
   const data = { confNumber: "", company: "", rooms: [] };
   const rawLines = text.split(/\r?\n/);
@@ -63,80 +72,97 @@ function parseBooking(text, forcedYear) {
   // Company: "Greetings/Regards From X"
   for (const line of rawLines) {
     const m = line.match(/(?:Greetings?|Regards?|Warm\s+Regards?|Hello)\s+(?:From|from)\s+(.+)/i);
-    if (m) {
-      data.company = m[1].replace(/[!*:,.\s]+$/g, "").trim();
-      break;
-    }
+    if (m) { data.company = m[1].replace(/[!*:,.\s]+$/g, "").trim(); break; }
   }
 
-  // Year priority: user-provided > year found in text > current year
   const yearMatch = text.match(/\b(20\d{2})\b/);
   const year = (forcedYear && String(forcedYear).trim()) || (yearMatch ? yearMatch[1] : CURRENT_YEAR);
 
-  // Walk lines; a line that contains dates starts a NEW room.
-  let current = null;
-
-  for (let raw of rawLines) {
-    const line = raw.trim();
-    if (!line) continue;
-    // skip the table header row
-    if (/NAME OF PAX|S\.?\s*NO\b|CHECK\s*-?\s*IN|CHECK\s*-?\s*OUT|ROOM DETAILS/i.test(line)) continue;
-    // skip intro / greeting lines
-    if (/Kindly proceed|Rooms?\s+Booking|requirements/i.test(line)) continue;
-    if (/^(Greetings?|Regards?|Warm|Hello|Dear)\b/i.test(line)) continue;
-
-    const dates = findDates(line);
-    const cost = line.match(COST_RE);
-    const isExtra = EXTRA_BED_RE.test(line);
-
-    // Clean the name = strip leading serial number, dates, room words, counts, meal, cost
-    let namePart = line
-      .replace(/^\s*\d+[\).\s]+/, "")      // leading serial "1 " / "1) "
+  // Clean a line into just the guest-name portion (strip serial, dates, room words, counts…)
+  function nameOnly(line) {
+    return line
+      .replace(/^\s*\d+[\).\s]+/, "")
       .replace(DATE_RE, " ")
       .replace(COST_RE, " ")
-      .replace(/Deluxe Room|Standard Room|Superior Room|Suite|With Extra Bed|Extra Bed|Room/gi, " ")
+      .replace(/Deluxe Room|Standard Room|Superior Room|Suite|Family Room|With Extra Bed|Extra Bed|Room Details|Room/gi, " ")
       .replace(ADULT_RE, " ")
       .replace(NIGHTS_RE, " ")
       .replace(MEAL_RE, " ")
       .replace(/\b\d+\b/g, " ")
+      .replace(/[|]/g, " ")
       .replace(/\s{2,}/g, " ")
       .trim();
-
-    if (dates && dates.length >= 1) {
-      // NEW ROOM
-      current = {
-        guests: [],
-        checkIn: formatDate(dates[0], year),
-        checkOut: dates[1] ? formatDate(dates[1], year) : "",
-        nights: 0, roomType: "Deluxe Room", meal: "", adults: 0, rate: 0, extra: 0,
-      };
-      const roomTypeM = line.match(/(Deluxe Room|Standard Room|Superior Room|Suite|Family Room)/i);
-      if (roomTypeM) current.roomType = titleCase(roomTypeM[1]);
-      const a = line.match(ADULT_RE); if (a) current.adults = parseInt(a[1], 10);
-      const n = line.match(NIGHTS_RE); if (n) current.nights = parseInt(n[1], 10);
-      const meal = line.match(MEAL_RE); if (meal) current.meal = meal[1].toUpperCase();
-      if (cost) { current.rate = parseFloat(cost[1]); current._costNights = parseInt(cost[2], 10); }
-      if (namePart) current.guests.push(namePart.toUpperCase());
-      data.rooms.push(current);
-    } else if (current) {
-      // continuation line for current room
-      if (isExtra && cost) {
-        current.extra = parseFloat(cost[1]); // extra bed fee per night
-        if (!current._costNights) current._costNights = parseInt(cost[2], 10);
-      } else if (cost && !current.rate) {
-        current.rate = parseFloat(cost[1]);
-        current._costNights = parseInt(cost[2], 10);
-      }
-      // meal / nights / adults may appear on continuation lines too
-      if (!current.meal) { const meal = line.match(MEAL_RE); if (meal) current.meal = meal[1].toUpperCase(); }
-      if (!current.nights) { const n = line.match(NIGHTS_RE); if (n) current.nights = parseInt(n[1], 10); }
-      if (!current.adults) { const a = line.match(ADULT_RE); if (a) current.adults = parseInt(a[1], 10); }
-      if (namePart && !isExtra) current.guests.push(namePart.toUpperCase());
-    }
   }
 
-  // Fallbacks: derive nights from the cost formula (rate x nights) on the room itself,
-  // else from the date difference; default meal BB.
+  const isNoise = (line) =>
+    /NAME OF PAX|S\.?\s*NO\b|CHECK\s*-?\s*IN|CHECK\s*-?\s*OUT|ROOM DETAILS|ADULTS?\b|NIGHTS?\b|MEAL\b|COST\b/i.test(line) && !findDates(line).length && !COST_RE.test(line) ||
+    /Kindly proceed|Rooms?\s+Booking|requirements/i.test(line) ||
+    /^(Greetings?|Regards?|Warm|Hello|Dear)\b/i.test(line);
+
+  let current = null;
+  let dateCount = 0; // 0 => next date is check-in, 1 => next date is check-out
+
+  for (let raw of rawLines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (isNoise(line)) continue;
+
+    const dates = findDates(line);
+    const cost = line.match(COST_RE);
+    const isExtra = EXTRA_BED_RE.test(line);
+    const name = nameOnly(line);
+
+    // Walk the dates on this line in order and assign them.
+    let di = 0;
+    // If the line has a name but no "check-in pending", attach name to current room first.
+    // We process dates, opening/closing rooms as pairs.
+    if (dates.length === 0) {
+      // no dates — pure attribute/guest line for the current room
+      if (current) attachAttributes(current, line, name, cost, isExtra);
+      continue;
+    }
+
+    // Line HAS dates — may contain the guest name too (columnar layout)
+    for (di = 0; di < dates.length; di++) {
+      if (dateCount === 0) {
+        // start a NEW room with this check-in
+        current = {
+          guests: [], checkIn: formatDate(dates[di], year), checkOut: "",
+          nights: 0, roomType: "Deluxe Room", meal: "", adults: 0, rate: 0, extra: 0,
+        };
+        data.rooms.push(current);
+        dateCount = 1;
+        // the name on a check-in line belongs to this new room
+        if (di === 0 && name) current.guests.push(name.toUpperCase());
+      } else {
+        // this date is the check-out of the current room
+        if (current) current.checkOut = formatDate(dates[di], year);
+        dateCount = 0;
+      }
+    }
+    // attributes (room type / adults / nights / meal / cost) on the same line
+    if (current) attachAttributes(current, line, dates.length ? "" : name, cost, isExtra);
+  }
+
+  function attachAttributes(room, line, name, cost, isExtra) {
+    const roomTypeM = line.match(/(Deluxe Room|Standard Room|Superior Room|Suite|Family Room)/i);
+    if (roomTypeM) room.roomType = titleCase(roomTypeM[1]);
+    const a = line.match(ADULT_RE); if (a && !room.adults) room.adults = parseInt(a[1], 10);
+    const n = line.match(NIGHTS_RE); if (n && !room.nights) room.nights = parseInt(n[1], 10);
+    const meal = line.match(MEAL_RE); if (meal && !room.meal) room.meal = meal[1].toUpperCase();
+    if (cost) {
+      if (isExtra) {
+        room.extra = parseFloat(cost[1]);
+        if (!room._costNights) room._costNights = parseInt(cost[2], 10);
+      } else if (!room.rate) {
+        room.rate = parseFloat(cost[1]);
+        room._costNights = parseInt(cost[2], 10);
+      }
+    }
+    if (name && !isExtra && !/^\s*$/.test(name)) room.guests.push(name.toUpperCase());
+  }
+
+  // Fallbacks
   data.rooms.forEach((r) => {
     if (!r.nights && r._costNights) r.nights = r._costNights;
     if (!r.nights) {
