@@ -69,12 +69,95 @@ const CURRENT_YEAR = String(new Date().getFullYear());
 
 // Main entry: detect which kind of booking document this is and route to the right parser.
 function parseBooking(text, forcedYear) {
+  // "Prose" formats (e.g. Dahr Tours) use free-text labels like "Lead Pax Name :",
+  // "Date : Check in … check out …", "Room : … PER ROOM PER NIGHT".
+  const looksProse = /Lead\s*Pax|Total\s*Pax|PER\s*ROOM\s*PER\s*NIGHT|Date\s*:\s*Check\s*in/i.test(text);
+  if (looksProse) return parseProse(text, forcedYear);
+
   // "Labeled" formats (e.g. Darina Holidays) use "Check In:" / "Room Type:" / "Names:" labels
   // and a "Rates Breakdown" / "Sum Total" block instead of a per-guest row table.
   const looksLabeled = /Check\s*In\s*:/i.test(text) &&
     (/Room\s*Type\s*:/i.test(text) || /Sum\s*Total\s*:/i.test(text) || /Rates?\s*Breakdown/i.test(text));
   if (looksLabeled) return parseLabeled(text, forcedYear);
+
   return parseTabular(text, forcedYear);
+}
+
+/* ---- Format 3: PROSE / free-text labels (Dahr Tours-style) ------------------ */
+function parseProse(text, forcedYear) {
+  const data = { confNumber: "", company: "", rooms: [] };
+  const yearMatch = text.match(/\b(20\d{2})\b/);
+  const year = (forcedYear && String(forcedYear).trim()) || (yearMatch ? yearMatch[1] : CURRENT_YEAR);
+  const grab = (re) => { const m = text.match(re); return m ? m[1].trim() : ""; };
+
+  // Company
+  const greet = text.match(/(?:Greetings?|Regards?)\s+from\s+(.+)/i);
+  if (greet) data.company = greet[1].replace(/[!*:,.]+\s*$/g, "").trim();
+
+  // Confirmation / Ref
+  const ref = grab(/\bRef\.?\s*:?\s*([A-Z0-9\-\/]{4,})/i);
+  if (ref) data.confNumber = ref;
+
+  // Guest: "Lead Pax Name : MS. SURAIYA MAJIDI X 01 PAX - (TANZANIAN)"
+  let guest = grab(/Lead\s*Pax\s*Name\s*:?\s*([^\n\r]+)/i) || grab(/(?:Guest|Pax|Name)\s*:?\s*([^\n\r]+)/i);
+  if (guest) {
+    guest = guest
+      .replace(/\bX\s*\d+\s*PAX\b.*/i, "")   // drop "X 01 PAX - (TANZANIAN)"
+      .replace(/\(.*?\)/g, "")               // drop "(TANZANIAN)"
+      .replace(/[-–].*/, "")                  // drop trailing dash notes
+      .replace(/\s{2,}/g, " ")
+      .trim();
+  }
+
+  // Dates: "Check in 07 check out 13 October - 2026"  OR  "Check in 07-Oct check out 13-Oct"
+  let checkIn = "", checkOut = "", nights = 0;
+  const dm = text.match(/check\s*in\s*([0-9]{1,2})(?:\s*[A-Za-z]{0,9})?\s*(?:to|-|–|check\s*out)\s*([0-9]{1,2})\s*([A-Za-z]{3,9})?\s*[-–]?\s*(\d{4})?/i);
+  if (dm) {
+    const d1 = dm[1], d2 = dm[2], mon = dm[3] || "", yr = dm[4] || year;
+    checkIn = formatDate(`${d1}-${mon}`.replace(/-$/, ""), yr) || `${ordinal(+d1)} ${monthName(mon)} ${yr}`;
+    checkOut = formatDate(`${d2}-${mon}`.replace(/-$/, ""), yr) || `${ordinal(+d2)} ${monthName(mon)} ${yr}`;
+    if (+d2 > +d1) nights = +d2 - +d1;
+  } else {
+    const dates = findDates(text);
+    if (dates[0]) checkIn = formatDate(dates[0], year);
+    if (dates[1]) checkOut = formatDate(dates[1], year);
+    const d1 = parseDay(checkIn), d2 = parseDay(checkOut);
+    if (d1 != null && d2 != null && d2 > d1) nights = d2 - d1;
+  }
+
+  // Adults: "Total Pax : 01 ADULTS"
+  const adults = parseInt(grab(/Total\s*Pax\s*:?\s*0*(\d+)/i) || grab(/0*(\d+)\s*ADULTS?/i) || "1", 10);
+
+  // Room + rate + meal: "Room :01 DELUXE ROOM BB BASIS – 185 AED / - PER ROOM PER NIGHT BB"
+  const roomLine = grab(/Room\s*:?\s*([^\n\r]+)/i);
+  let roomType = "Deluxe Room", meal = "", rate = 0, roomCount = 1;
+  const hotelLine = grab(/Hotel\s*:?\s*([^\n\r]+)/i);
+  if (roomLine) {
+    const rc = roomLine.match(/^0*(\d+)\s/); if (rc) roomCount = parseInt(rc[1], 10);
+    const rtM = roomLine.match(/(Deluxe Room|Standard Room|Superior Room|Suite|Family Room|Studio)/i);
+    if (rtM) roomType = titleCase(rtM[1]);
+    const mealM = roomLine.match(/\b(BB|HB|FB|RO|AI|CP|MAP|AP|EP)\b/i);
+    if (mealM) meal = mealM[1].toUpperCase();
+    const rateM = roomLine.match(/([\d,]+(?:\.\d+)?)\s*AED/i) || roomLine.match(/AED\s*([\d,]+(?:\.\d+)?)/i);
+    if (rateM) rate = parseFloat(rateM[1].replace(/,/g, ""));
+  }
+  if (!meal && hotelLine) { const m = hotelLine.match(/\b(BB|HB|FB|RO|AI)\b/i); if (m) meal = m[1].toUpperCase(); }
+
+  // Build one room per room-count (same details) — usually 1.
+  for (let i = 0; i < (roomCount || 1); i++) {
+    data.rooms.push({
+      guests: guest ? [guest.toUpperCase()] : [],
+      checkIn, checkOut, nights: nights || 1,
+      roomType, meal: meal || "BB",
+      adults: adults || 1, children: 0,
+      rate, extra: 0,
+    });
+  }
+  return data;
+}
+function monthName(abbr) {
+  if (!abbr) return "";
+  return MONTHS[abbr.slice(0, 3).toLowerCase()] || titleCase(abbr);
 }
 
 /* ---- Format 2: LABELED single/multi booking (Darina-style) ------------------ */
