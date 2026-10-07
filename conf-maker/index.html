@@ -97,13 +97,14 @@ S.NO   NAME OF PAX              CHECK-IN  CHECK-OUT  ROOM DETAILS     ADULTS   N
 
     <section class="card" id="resultCard" hidden>
       <h2>Confirmation</h2>
-      <div class="row result-actions">
+      <div id="confirmationOutput" class="confirmation"></div>
+
+      <div class="row result-actions" style="margin-top:18px;">
         <button id="copyHtmlBtn" class="btn secondary">📋 Copy (Email)</button>
         <button id="copyTextBtn" class="btn secondary">📄 Copy (Plain Text)</button>
         <button id="downloadBtn" class="btn secondary">⬇️ Download</button>
         <button id="printBtn" class="btn ghost">🖨️ Print</button>
       </div>
-      <div id="confirmationOutput" class="confirmation"></div>
 
       <details class="raw">
         <summary>Show detected data (check if parsing is correct)</summary>
