@@ -289,6 +289,12 @@ function render(data, nonRefundable) {
    the table borders & formatting when pasted. (Outlook ignores <style> tags
    and CSS classes, so every style must live on the element itself.)
    ========================================================================= */
+// Signature banner image. When a signature image is available it is embedded here as an
+// <img> tag (base64 data URI so it survives copy-paste into Outlook). Empty by default.
+const SIGNATURE_IMG = (typeof SIGNATURE_DATA_URL !== "undefined" && SIGNATURE_DATA_URL)
+  ? `<p style="margin:14px 0;"><img src="${SIGNATURE_DATA_URL}" alt="Grand Central Hotel - Naseem Mohamed" style="max-width:620px;width:100%;height:auto;border:0;display:block;"></p>`
+  : "";
+
 const S = {
   table: "border-collapse:collapse;width:100%;max-width:640px;margin:14px 0 20px;font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1a1a1a;",
   th: "border:1px solid #c9c9c9;background:#f3ead3;color:#4a3c15;text-align:left;padding:8px 12px;font-weight:bold;width:34%;vertical-align:top;",
@@ -366,10 +372,10 @@ function renderEmail(data, nonRefundable) {
     <p style="${S.ovTitle}">Grand Central Hotel – Quick Overview</p>
     <p style="${noteP}">⭐ <strong>Star Rating:</strong> Marketed as a 4 star property with 140 rooms. It's centrally located in Deira near Al Rigga Road. Muraqqabat Street - Deira - Dubai</p>
     <p style="${noteP}">📍 <strong>Location:</strong> Just a 3–4 minute walk (230 m) to Al Rigga Metro Station, offering seamless access to Dubai's transit network and attractions like Deira City Centre and the Dubai Museum</p>
-    <p style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1a1a1a;margin:16px 0 12px;">Should you have any further concerns or feedback, please do not hesitate to reach out to us directly.</p>
-    <p style="${S.p}">Thank you,</p>
-    <p style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1a1a1a;margin:0 0 2px;line-height:1.6;">Kind Regards<br>Naseem Mohamed<br>Whatsapp: <a href="https://wa.me/971553440486" style="color:#1a7a3a;">https://wa.me/971553440486</a></p>
-    <p style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1a1a1a;margin:14px 0 0;">🌿 Please don't print this email unless you really need to</p>
+    <p style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1a1a1a;margin:16px 0 14px;">Should you have any further concerns or feedback, please do not hesitate to reach out to us directly.</p>
+    <p style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1a1a1a;margin:0 0 14px;line-height:1.6;">Thank you,<br>Kind Regards<br>Naseem Mohamed<br>Whatsapp: <a href="https://wa.me/971553440486" style="color:#1a7a3a;">https://wa.me/971553440486</a></p>
+    ${SIGNATURE_IMG}
+    <p style="font-family:Segoe UI,Arial,sans-serif;font-size:13px;color:#1a7a3a;font-weight:bold;margin:12px 0 0;">🌿 Please don't print this email unless you really need to</p>
   </div>`;
 }
 
