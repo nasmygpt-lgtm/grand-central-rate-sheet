@@ -19,27 +19,66 @@
 
   <main class="container">
     <section class="card">
-      <h2>Booking Details</h2>
-      <p class="hint">Fill in the details below and click <strong>Generate</strong>. For multiple rooms, click <em>+ Add Room</em>.</p>
+      <h2>Booking Input</h2>
 
-      <div class="form-grid">
-        <label>Hotel Confirmation <input type="text" id="confNumber" placeholder="e.g. 35010 (leave blank if none)"></label>
-        <label>Company Name <input type="text" id="company" placeholder="e.g. Pace Tourism"></label>
+      <div class="tabs">
+        <div class="tab active" data-tab="paste">📋 Paste Text</div>
+        <div class="tab" data-tab="upload">📸 Upload Screenshot</div>
+      </div>
+
+      <!-- UPLOAD PANEL -->
+      <div id="panel-upload" class="panel" hidden>
+        <p class="hint">Upload or paste a screenshot. It will be read with in-browser OCR (no API key) and the extracted text appears in the Paste box — review &amp; fix it, then Generate.</p>
+        <div id="dropZone" class="dropzone" tabindex="0">
+          <input type="file" id="fileInput" accept="image/*" hidden />
+          <div id="dropPrompt" class="drop-prompt">
+            <span class="drop-icon">📸</span>
+            <p>Drop screenshot here, click to browse, or paste (Ctrl/Cmd+V)</p>
+          </div>
+          <img id="preview" class="preview" alt="preview" hidden />
+        </div>
+        <div class="row">
+          <button id="ocrBtn" class="btn secondary" disabled>🔍 Read Screenshot (OCR)</button>
+        </div>
+        <p id="ocrStatus" class="status"></p>
+      </div>
+
+      <!-- PASTE PANEL -->
+      <div id="panel-paste" class="panel">
+      <p class="hint">Copy the booking (from email / sheet) and paste it below, then click <strong>Generate</strong>. It auto-detects company, rooms, guests, dates, nights, meal plan and rates.</p>
+
+      <textarea id="input" class="paste-box" placeholder="Example:
+
+Greetings From Ghai Holidays !!!!!!
+
+Kindly proceed 4 Rooms Booking as per the below requirements :-
+
+S.NO   NAME OF PAX              CHECK-IN  CHECK-OUT  ROOM DETAILS     ADULTS   NIGHTS  MEAL  COST
+1      AMANDEEP SINGH KHANGURA  14-Oct    18-Oct     Deluxe Room      3 Adult  4       BB    200 x 4 = 800
+2      KARANVEER SINGH                                With Extra Bed                         70 x 4 = 280
+3      UCHVIR SINGH
+..."></textarea>
       </div>
 
       <label class="checkbox-row">
         <input type="checkbox" id="nonRefundable">
         Non-Refundable booking (removes Cancellation / Early Departure / Payment notes)
       </label>
-
-      <h3>Rooms</h3>
-      <div id="rooms"></div>
-      <button id="addRoomBtn" class="btn ghost">+ Add Room</button>
+      <label class="checkbox-row">
+        Hotel Confirmation No. (optional):
+        <input type="text" id="confNumber" placeholder="e.g. 35010" style="max-width:160px">
+      </label>
+      <label class="checkbox-row">
+        Year (for dates):
+        <input type="number" id="year" placeholder="2025" style="max-width:110px">
+      </label>
 
       <div class="row actions">
         <button id="generateBtn" class="btn primary">⚙️ Generate Confirmation</button>
-        <button id="resetBtn" class="btn ghost">Reset</button>
+        <button id="exampleBtn" class="btn ghost">Load Example</button>
+        <button id="clearBtn" class="btn ghost">Clear</button>
       </div>
+      <p id="status" class="status"></p>
     </section>
 
     <section class="card" id="resultCard" hidden>
@@ -51,6 +90,11 @@
         <button id="printBtn" class="btn ghost">🖨️ Print</button>
       </div>
       <div id="confirmationOutput" class="confirmation"></div>
+
+      <details class="raw">
+        <summary>Show detected data (check if parsing is correct)</summary>
+        <pre id="rawJson"></pre>
+      </details>
     </section>
   </main>
 
@@ -58,27 +102,7 @@
     <p>Grand Central Hotel · Muraqqabat Street, Deira, Dubai</p>
   </footer>
 
-  <template id="roomTemplate">
-    <div class="room-block">
-      <div class="room-block-head">
-        <span class="room-label">Room</span>
-        <button class="btn ghost remove-room" title="Remove room">✕</button>
-      </div>
-      <div class="form-grid">
-        <label>Guest Name (one lead guest) <input type="text" class="f-guests" placeholder="e.g. AMANDEEP SINGH KHANGURA"></label>
-        <label>Room Type <input type="text" class="f-roomtype" value="Deluxe Room"></label>
-        <label>Check In <input type="text" class="f-checkin" placeholder="e.g. 16th October 2025"></label>
-        <label>Check Out <input type="text" class="f-checkout" placeholder="e.g. 21st October 2025"></label>
-        <label>Nights <input type="number" class="f-nights" min="1" value="1"></label>
-        <label>Meal Plan <input type="text" class="f-meal" value="BB"></label>
-        <label>Adults <input type="number" class="f-adults" min="1" value="2"></label>
-        <label>Children <input type="number" class="f-children" min="0" value="0"></label>
-        <label>Rate per Night (AED) <input type="number" class="f-rate" step="0.01" placeholder="e.g. 200"></label>
-        <label>Extra Bed Fee / Night (AED) <input type="number" class="f-extra" step="0.01" value="0"></label>
-      </div>
-    </div>
-  </template>
-
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

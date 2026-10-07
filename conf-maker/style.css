@@ -31,6 +31,28 @@ body {
 .card h3 { margin: 20px 0 10px; font-size: 1rem; }
 .hint { color: var(--muted); font-size: .9rem; margin: 0 0 16px; }
 
+.paste-box {
+  width: 100%; min-height: 220px; resize: vertical;
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  padding: 12px 14px; border-radius: 8px; font-size: .9rem;
+  font-family: "Consolas", "Courier New", monospace; line-height: 1.5;
+}
+.paste-box:focus { outline: 2px solid var(--gold); border-color: var(--gold); }
+
+.tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+.tab { padding: 8px 16px; border-radius: 8px 8px 0 0; cursor: pointer; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); font-weight: 600; }
+.tab.active { background: var(--gold); color: #1a1a1a; border-color: var(--gold); }
+
+.dropzone {
+  border: 2px dashed var(--border); border-radius: 10px; min-height: 150px;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  background: var(--panel-2); margin-bottom: 12px; transition: border-color .15s, background .15s;
+}
+.dropzone.dragover { border-color: var(--gold); background: #263240; }
+.drop-prompt { text-align: center; color: var(--muted); }
+.drop-icon { font-size: 2.2rem; display: block; margin-bottom: 6px; }
+.preview { max-width: 100%; max-height: 320px; border-radius: 8px; }
+
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
 label { display: flex; flex-direction: column; gap: 5px; font-size: .85rem; color: var(--muted); }
 input[type="text"], input[type="number"] {
