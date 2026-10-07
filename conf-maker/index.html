@@ -117,13 +117,19 @@ S.NO   NAME OF PAX              CHECK-IN  CHECK-OUT  ROOM DETAILS     ADULTS   N
   </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <!-- PDF.js legacy UMD build exposes a global `pdfjsLib`. Loaded before app.js. -->
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.min.js"></script>
   <script>
-    // Point PDF.js at its worker (required for text extraction)
-    if (window.pdfjsLib) {
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-    }
+    // Point PDF.js at its worker (required for text extraction). Guarded so a CDN miss
+    // never throws and blocks the rest of the page.
+    (function () {
+      try {
+        if (window.pdfjsLib && window.pdfjsLib.GlobalWorkerOptions) {
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+            "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.worker.min.js";
+        }
+      } catch (e) { console.warn("PDF.js worker setup skipped:", e); }
+    })();
   </script>
   <script src="app.js"></script>
 </body>

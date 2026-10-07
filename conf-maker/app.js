@@ -601,13 +601,19 @@ document.querySelectorAll(".tab").forEach((tab) => {
 const pdfDropZone = el("pdfDropZone");
 const pdfInput = el("pdfInput");
 
-pdfDropZone.addEventListener("click", () => pdfInput.click());
-pdfDropZone.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") pdfInput.click(); });
-pdfInput.addEventListener("change", (e) => { if (e.target.files[0]) loadPdf(e.target.files[0]); });
+if (pdfDropZone && pdfInput) {
+  // Open the file picker on click (ignore clicks that originate from the input itself).
+  pdfDropZone.addEventListener("click", (e) => {
+    if (e.target === pdfInput) return;
+    pdfInput.click();
+  });
+  pdfDropZone.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pdfInput.click(); } });
+  pdfInput.addEventListener("change", (e) => { if (e.target.files[0]) loadPdf(e.target.files[0]); });
 
-["dragenter", "dragover"].forEach((ev) => pdfDropZone.addEventListener(ev, (e) => { e.preventDefault(); pdfDropZone.classList.add("dragover"); }));
-["dragleave", "drop"].forEach((ev) => pdfDropZone.addEventListener(ev, (e) => { e.preventDefault(); pdfDropZone.classList.remove("dragover"); }));
-pdfDropZone.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) loadPdf(f); });
+  ["dragenter", "dragover"].forEach((ev) => pdfDropZone.addEventListener(ev, (e) => { e.preventDefault(); pdfDropZone.classList.add("dragover"); }));
+  ["dragleave", "drop"].forEach((ev) => pdfDropZone.addEventListener(ev, (e) => { e.preventDefault(); pdfDropZone.classList.remove("dragover"); }));
+  pdfDropZone.addEventListener("drop", (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) loadPdf(f); });
+}
 
 function setPdf(cls, msg) {
   const s = el("pdfStatus");
@@ -620,10 +626,15 @@ async function loadPdf(file) {
     return setPdf("err", "Please provide a PDF file.");
   }
   if (typeof pdfjsLib === "undefined") {
-    return setPdf("err", "PDF library failed to load (check your internet connection).");
+    return setPdf("err", "PDF library failed to load (check your internet connection, then reload).");
   }
   setPdf("working", `<span class="spinner"></span>Reading PDF…`);
   try {
+    // Ensure the worker is configured (in case the inline setup ran before the lib loaded)
+    if (pdfjsLib.GlobalWorkerOptions && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.worker.min.js";
+    }
     const buf = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
     let out = "";
