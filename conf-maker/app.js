@@ -439,14 +439,14 @@ function render(data, nonRefundable) {
   return `
     <p>Dear Reservation Team,</p>
     <p>Greetings,</p>
-    <p>We are pleased to confirm your reservation at Grand Central Deira, Dubai, as per the following details:</p>
+    <p>We are pleased to confirm your reservation in Dubai, as per the following details:</p>
     ${tables}
     ${grandHtml}
     ${notes}
     <p>Should you have any further concerns or feedback, please do not hesitate to reach out to us directly.</p>
     <div class="sign">
       <p>Thank you,</p>
-      <p>Kind Regards<br>Naseem Mohamed<br>Whatsapp: <a href="https://wa.me/971553440486">https://wa.me/971553440486</a></p>
+      <p>Kind Regards</p>
       <p>🌿 P Please don't print this email unless you really need to</p>
     </div>`;
 }
@@ -541,7 +541,7 @@ function renderEmail(data, nonRefundable) {
     ${blank}
     ${line("Greetings,")}
     ${blank}
-    ${line("We are pleased to confirm your reservation at Grand Central Deira, Dubai, as per the following details:")}
+    ${line("We are pleased to confirm your reservation in Dubai, as per the following details:")}
     ${blank}
     ${tables}
     ${grandHtml}
@@ -553,8 +553,6 @@ function renderEmail(data, nonRefundable) {
     ${blank}
     ${line("Thank you,")}
     ${line("Kind Regards")}
-    ${line("Naseem Mohamed")}
-    ${line(`Whatsapp: <a href="https://wa.me/971553440486" style="color:#1a7a3a;">https://wa.me/971553440486</a>`)}
     ${SIGNATURE_IMG}
     ${line(`<span style="color:#1a7a3a;font-weight:bold;">🌿 Please don't print this email unless you really need to</span>`)}
   </div>`;
