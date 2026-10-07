@@ -7,16 +7,6 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">
-      <span class="logo">🏨</span>
-      <div>
-        <h1>Grand Central Hotel</h1>
-        <p>Reservation Confirmation Generator — Deira, Dubai</p>
-      </div>
-    </div>
-  </header>
-
   <main class="container">
     <section class="card">
       <h2>Booking Input</h2>
@@ -61,17 +51,7 @@
       <div id="panel-paste" class="panel">
       <p class="hint">Copy the booking (from email / sheet / PDF) and paste it below, then click <strong>Generate</strong>. It auto-detects the format — row-based tables (e.g. Ghai Holidays) and labelled layouts (e.g. Darina Holidays) — pulling out company, rooms, guests, dates, nights, meal plan and rates.</p>
 
-      <textarea id="input" class="paste-box" placeholder="Example:
-
-Greetings From Ghai Holidays !!!!!!
-
-Kindly proceed 4 Rooms Booking as per the below requirements :-
-
-S.NO   NAME OF PAX              CHECK-IN  CHECK-OUT  ROOM DETAILS     ADULTS   NIGHTS  MEAL  COST
-1      AMANDEEP SINGH KHANGURA  14-Oct    18-Oct     Deluxe Room      3 Adult  4       BB    200 x 4 = 800
-2      KARANVEER SINGH                                With Extra Bed                         70 x 4 = 280
-3      UCHVIR SINGH
-..."></textarea>
+      <textarea id="input" class="paste-box" placeholder="Paste your booking details here..."></textarea>
       </div>
 
       <label class="checkbox-row">
