@@ -40,7 +40,9 @@ function formatDate(raw, year) {
 
 // Date must be: day + month-name  (or day/month numeric with a slash/dash). We require a
 // month NAME or a dd-mm style so plain "4" (as in "4 Rooms") is never seen as a date.
-const DATE_RE = /\b(\d{1,2}[\s\-\/](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*(?:[\s\-\/]\d{2,4})?)\b/gi;
+// day + month-name, with an OPTIONAL year that must be a full 4-digit year, or a
+// 2-4 digit year joined by a dash/slash (NOT a space/tab — that would swallow the next column).
+const DATE_RE = /\b(\d{1,2}[\s\-\/](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*(?:[\-\/]\d{2,4}|\s+\d{4})?)\b/gi;
 function findDates(s) { return s.match(DATE_RE) || []; }
 // extract day-of-month number from a formatted date like "14th October 2025"
 function parseDay(formatted) {
