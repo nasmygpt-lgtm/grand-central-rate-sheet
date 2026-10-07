@@ -349,33 +349,51 @@ function renderEmail(data, nonRefundable) {
   const grandHtml = multi ? `<p style="${S.p}text-align:right;"><strong>Grand Total = AED ${num(grand)}</strong></p>` : "";
 
   const nr = nonRefundable;
-  // Use plain paragraphs (NOT <ul>/<li>) — Outlook forces bullet dots on list items.
-  // Each note is its own line with tight spacing.
-  const noteP = "font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1a1a1a;margin:0 0 6px;line-height:1.5;";
-  const notes = `
-    <p style="${S.title}">Additional Notes:</p>
-    <p style="${noteP}">✔ <strong>Deposit Policy:</strong> A refundable deposit of AED 200 is required at check-in. This amount will be refunded upon check-out after room inspection, provided no damages or incidental charges apply.</p>
-    <p style="${noteP}">✔ <strong>Check-in/out Times:</strong> 14:00 (2 PM) / 12:00 (Noon)</p>
-    ${nr ? "" : `<p style="${noteP}">✔ <strong>Cancellation Policy:</strong> Free cancellation until 14 days before arrival. Late cancellations incur one night's charge.</p>
-    <p style="${noteP}">✔ <strong>Early Departure:</strong> 50% penalty charges applicable</p>
-    <p style="${noteP}">✔ <strong>Payment:</strong> Room charges to be settled 14 days before arrival</p>`}
-    <p style="${noteP}">✔ <strong>Parking:</strong> Basement paid parking available at AED 25 per day.</p>
-    <p style="${noteP}">✔ <strong>Visitor Policy:</strong> Only registered guests are permitted in the room. Any additional visitors beyond the booked occupancy will be subject to additional charges as per the hotel policy.</p>`;
+  // Outlook IGNORES CSS margins on pasted <p> tags, which is why lines looked cramped.
+  // The reliable fix: one line per <div> plus EMPTY spacer lines (<div>&nbsp;</div>)
+  // between sections — Outlook always honours actual line content.
+  const L = "font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1a1a1a;line-height:1.5;";
+  const line = (html) => `<div style="${L}">${html}</div>`;
+  const blank = `<div style="${L}">&nbsp;</div>`;
+  const bold = (html) => `<div style="${L}font-weight:bold;">${html}</div>`;
+
+  const noteLines = [
+    `✔ <strong>Deposit Policy:</strong> A refundable deposit of AED 200 is required at check-in. This amount will be refunded upon check-out after room inspection, provided no damages or incidental charges apply.`,
+    `✔ <strong>Check-in/out Times:</strong> 14:00 (2 PM) / 12:00 (Noon)`,
+    ...(nr ? [] : [
+      `✔ <strong>Cancellation Policy:</strong> Free cancellation until 14 days before arrival. Late cancellations incur one night's charge.`,
+      `✔ <strong>Early Departure:</strong> 50% penalty charges applicable`,
+      `✔ <strong>Payment:</strong> Room charges to be settled 14 days before arrival`,
+    ]),
+    `✔ <strong>Parking:</strong> Basement paid parking available at AED 25 per day.`,
+    `✔ <strong>Visitor Policy:</strong> Only registered guests are permitted in the room. Any additional visitors beyond the booked occupancy will be subject to additional charges as per the hotel policy.`,
+  ].map(line).join("");
 
   return `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1a1a1a;">
-    <p style="${S.p}">Dear Reservation Team,</p>
-    <p style="${S.p}">Greetings from Grand Central Hotel,</p>
-    <p style="${S.p}">We are pleased to confirm your reservation at Grand Central Deira, Dubai, as per the following details:</p>
+    ${line("Dear Reservation Team,")}
+    ${blank}
+    ${line("Greetings from Grand Central Hotel,")}
+    ${blank}
+    ${line("We are pleased to confirm your reservation at Grand Central Deira, Dubai, as per the following details:")}
+    ${blank}
     ${tables}
     ${grandHtml}
-    ${notes}
-    <p style="${S.ovTitle}">Grand Central Hotel – Quick Overview</p>
-    <p style="${noteP}">⭐ <strong>Star Rating:</strong> Marketed as a 4 star property with 140 rooms. It's centrally located in Deira near Al Rigga Road. Muraqqabat Street - Deira - Dubai</p>
-    <p style="${noteP}">📍 <strong>Location:</strong> Just a 3–4 minute walk (230 m) to Al Rigga Metro Station, offering seamless access to Dubai's transit network and attractions like Deira City Centre and the Dubai Museum</p>
-    <p style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1a1a1a;margin:16px 0 14px;">Should you have any further concerns or feedback, please do not hesitate to reach out to us directly.</p>
-    <p style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1a1a1a;margin:0 0 14px;line-height:1.6;">Thank you,<br>Kind Regards<br>Naseem Mohamed<br>Whatsapp: <a href="https://wa.me/971553440486" style="color:#1a7a3a;">https://wa.me/971553440486</a></p>
+    ${blank}
+    ${bold("Additional Notes:")}
+    ${noteLines}
+    ${blank}
+    ${bold(`<span style="color:#1a4a7a;">Grand Central Hotel – Quick Overview</span>`)}
+    ${line(`⭐ <strong>Star Rating:</strong> Marketed as a 4 star property with 140 rooms. It's centrally located in Deira near Al Rigga Road. Muraqqabat Street - Deira - Dubai`)}
+    ${line(`📍 <strong>Location:</strong> Just a 3–4 minute walk (230 m) to Al Rigga Metro Station, offering seamless access to Dubai's transit network and attractions like Deira City Centre and the Dubai Museum`)}
+    ${blank}
+    ${line("Should you have any further concerns or feedback, please do not hesitate to reach out to us directly.")}
+    ${blank}
+    ${line("Thank you,")}
+    ${line("Kind Regards")}
+    ${line("Naseem Mohamed")}
+    ${line(`Whatsapp: <a href="https://wa.me/971553440486" style="color:#1a7a3a;">https://wa.me/971553440486</a>`)}
     ${SIGNATURE_IMG}
-    <p style="font-family:Segoe UI,Arial,sans-serif;font-size:13px;color:#1a7a3a;font-weight:bold;margin:12px 0 0;">🌿 Please don't print this email unless you really need to</p>
+    ${line(`<span style="color:#1a7a3a;font-weight:bold;">🌿 Please don't print this email unless you really need to</span>`)}
   </div>`;
 }
 
