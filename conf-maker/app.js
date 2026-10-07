@@ -67,7 +67,96 @@ const CURRENT_YEAR = String(new Date().getFullYear());
 // check-in, and so on. Everything between a room's check-in and the next room's check-in
 // (names, room type, counts, cost) belongs to that room.
 
+// Main entry: detect which kind of booking document this is and route to the right parser.
 function parseBooking(text, forcedYear) {
+  // "Labeled" formats (e.g. Darina Holidays) use "Check In:" / "Room Type:" / "Names:" labels
+  // and a "Rates Breakdown" / "Sum Total" block instead of a per-guest row table.
+  const looksLabeled = /Check\s*In\s*:/i.test(text) &&
+    (/Room\s*Type\s*:/i.test(text) || /Sum\s*Total\s*:/i.test(text) || /Rates?\s*Breakdown/i.test(text));
+  if (looksLabeled) return parseLabeled(text, forcedYear);
+  return parseTabular(text, forcedYear);
+}
+
+/* ---- Format 2: LABELED single/multi booking (Darina-style) ------------------ */
+function parseLabeled(text, forcedYear) {
+  const data = { confNumber: "", company: "", rooms: [] };
+  const yearMatch = text.match(/\b(20\d{2})\b/);
+  const year = (forcedYear && String(forcedYear).trim()) || (yearMatch ? yearMatch[1] : CURRENT_YEAR);
+
+  const grab = (re) => { const m = text.match(re); return m ? m[1].trim() : ""; };
+
+  // Company: prefer an email domain, else a "From:" / company name near the top.
+  const email = grab(/E-?mail\s*:\s*[\w.+-]+@([\w.-]+)/i);
+  if (email) {
+    // darinaholidays.ae -> DARINA HOLIDAYS
+    let base = email.split(".")[0];
+    base = base.replace(/holidays/i, " Holidays").replace(/tourism/i, " Tourism")
+               .replace(/travel/i, " Travel").replace(/vacations?/i, " Vacations");
+    data.company = base.replace(/([a-z])([A-Z])/g, "$1 $2").trim();
+    if (!/holidays|tourism|travel|vacation/i.test(data.company)) {
+      // domain had no keyword; just use the domain base
+      data.company = email.split(".")[0];
+    }
+  }
+  const greet = text.match(/(?:Greetings?|Regards?)\s+From\s+(.+)/i);
+  if (greet) data.company = greet[1].replace(/[!*:,.\s]+$/g, "").trim();
+
+  // Confirmation number: "Conf. No.: 12345" (ignore "From Allocation" placeholder)
+  const conf = grab(/Conf\.?\s*No\.?\s*:\s*([^\n\r]+)/i);
+  if (conf && !/from allocation|allocation|supplier|n\/?a|^-+$/i.test(conf)) {
+    const digits = conf.match(/\d+/);
+    data.confNumber = digits ? digits[0] : conf.trim();
+  }
+
+  // One or more booking blocks. Split on each "Check In:" occurrence to support multiple.
+  const blocks = text.split(/(?=Check\s*In\s*:)/i).filter((b) => /Check\s*In\s*:/i.test(b));
+  for (const blk of blocks) {
+    const checkInRaw = (blk.match(/Check\s*In\s*:\s*([0-9]{1,2}[\s\-\/][A-Za-z0-9]{2,}[\-\/0-9]*)/i) || [])[1] || "";
+    const checkOutRaw = (blk.match(/Check\s*Out\s*:\s*([0-9]{1,2}[\s\-\/][A-Za-z0-9]{2,}[\-\/0-9]*)/i) || [])[1] || "";
+    let nights = parseInt((blk.match(/Nights?\s*:\s*(\d+)/i) || [])[1] || "0", 10);
+
+    // Room type + meal plan from "Room Type: DBL / DELUXE ROOM / RO"
+    const rt = (blk.match(/Room\s*Type\s*:\s*([^\n\r]+)/i) || [])[1] || "";
+    let roomType = "Deluxe Room", meal = "";
+    if (rt) {
+      const parts = rt.split("/").map((s) => s.trim()).filter(Boolean);
+      const rtPart = parts.find((p) => /room|suite|deluxe|standard|superior|studio/i.test(p));
+      if (rtPart) roomType = titleCase(rtPart);
+      const mealPart = parts.find((p) => /^(BB|HB|FB|RO|AI|CP|MAP|AP|EP)$/i.test(p));
+      if (mealPart) meal = mealPart.toUpperCase();
+    }
+
+    const adults = parseInt((blk.match(/(?:No\.?\s*of\s*)?Adult'?s?\s*:\s*(\d+)/i) || [])[1] || "0", 10);
+    const children = parseInt((blk.match(/(?:No\.?\s*of\s*)?Child'?s?(?:ren)?\s*:\s*(\d+)/i) || [])[1] || "0", 10);
+    const names = ((blk.match(/Names?\s*:\s*([^\n\r]+)/i) || [])[1] || "").trim();
+
+    // Rate: prefer "Sum Total : 265.00", else first number in a rate row like "DBL 265.00"
+    let total = parseFloat((blk.match(/Sum\s*Total\s*:?\s*([\d,]+(?:\.\d+)?)/i) || [])[1]?.replace(/,/g, "") || "0");
+    if (!total) {
+      const rateRow = blk.match(/\b([A-Z]{2,4})\s+([\d,]+\.\d{2})/);
+      if (rateRow) total = parseFloat(rateRow[2].replace(/,/g, ""));
+    }
+    if (!nights) {
+      const d1 = parseDay(formatDate(checkInRaw, year)), d2 = parseDay(formatDate(checkOutRaw, year));
+      if (d1 != null && d2 != null && d2 > d1) nights = d2 - d1;
+    }
+    const perNight = nights ? +(total / nights).toFixed(2) : total;
+
+    data.rooms.push({
+      guests: names ? [names.toUpperCase()] : [],
+      checkIn: formatDate(checkInRaw, year),
+      checkOut: formatDate(checkOutRaw, year),
+      nights: nights || 1,
+      roomType, meal: meal || "RO",
+      adults: adults || 1, children,
+      rate: perNight, extra: 0,
+    });
+  }
+  return data;
+}
+
+/* ---- Format 1: TABULAR per-guest rows (Ghai-style) -------------------------- */
+function parseTabular(text, forcedYear) {
   const data = { confNumber: "", company: "", rooms: [] };
   const rawLines = text.split(/\r?\n/);
 
