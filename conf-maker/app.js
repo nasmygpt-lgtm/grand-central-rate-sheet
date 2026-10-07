@@ -459,7 +459,7 @@ function render(data, nonRefundable) {
 // Signature banner image. When a signature image is available it is embedded here as an
 // <img> tag (base64 data URI so it survives copy-paste into Outlook). Empty by default.
 const SIGNATURE_IMG = (typeof SIGNATURE_DATA_URL !== "undefined" && SIGNATURE_DATA_URL)
-  ? `<p style="margin:14px 0;"><img src="${SIGNATURE_DATA_URL}" alt="Grand Central Hotel - Naseem Mohamed" style="max-width:620px;width:100%;height:auto;border:0;display:block;"></p>`
+  ? `<p style="margin:14px 0;"><img src="${SIGNATURE_DATA_URL}" alt="Grand Central Hotel" style="max-width:620px;width:100%;height:auto;border:0;display:block;"></p>`
   : "";
 
 const S = {
