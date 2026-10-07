@@ -99,8 +99,42 @@ function parseBooking(text, forcedYear) {
     /Kindly proceed|Rooms?\s+Booking|requirements/i.test(line) ||
     /^(Greetings?|Regards?|Warm|Hello|Dear)\b/i.test(line);
 
+  // Does this line look like a pure person name? (letters/spaces/dots, no digits, not a keyword)
+  function looksLikeName(line) {
+    if (findDates(line).length) return false;
+    if (COST_RE.test(line)) return false;
+    if (/\d/.test(line)) return false;
+    if (/Deluxe|Standard|Superior|Suite|Family|Extra Bed|Room|Adult|Night|\bBB\b|\bHB\b|\bRO\b|\bFB\b/i.test(line)) return false;
+    const letters = line.replace(/[^A-Za-z]/g, "");
+    return letters.length >= 3;
+  }
+
   let current = null;
-  let dateCount = 0; // 0 => next date is check-in, 1 => next date is check-out
+  let dateCount = 0;       // 0 => next date is check-in (new room), 1 => next date is check-out
+  let pendingNames = [];   // names seen before a room's dates (cell-per-line layout)
+
+  function openRoom(checkIn) {
+    current = {
+      guests: [], checkIn, checkOut: "",
+      nights: 0, roomType: "Deluxe Room", meal: "", adults: 0, rate: 0, extra: 0,
+    };
+    data.rooms.push(current);
+    // the lead guest of this room = the FIRST pending name collected since the last room
+    if (pendingNames.length) current.guests.push(pendingNames[0].toUpperCase());
+    pendingNames = [];
+  }
+
+  function attachAttributes(room, line, cost, isExtra) {
+    const roomTypeM = line.match(/(Deluxe Room|Standard Room|Superior Room|Suite|Family Room)/i);
+    if (roomTypeM) room.roomType = titleCase(roomTypeM[1]);
+    const a = line.match(ADULT_RE); if (a && !room.adults) room.adults = parseInt(a[1], 10);
+    const n = line.match(NIGHTS_RE); if (n && !room.nights) room.nights = parseInt(n[1], 10);
+    const meal = line.match(MEAL_RE); if (meal && !room.meal) room.meal = meal[1].toUpperCase();
+    if (cost) {
+      if (isExtra) { room.extra = parseFloat(cost[1]); if (!room._costNights) room._costNights = parseInt(cost[2], 10); }
+      else if (!room.rate) { room.rate = parseFloat(cost[1]); room._costNights = parseInt(cost[2], 10); }
+    }
+  }
 
   for (let raw of rawLines) {
     const line = raw.trim();
@@ -110,56 +144,42 @@ function parseBooking(text, forcedYear) {
     const dates = findDates(line);
     const cost = line.match(COST_RE);
     const isExtra = EXTRA_BED_RE.test(line);
-    const name = nameOnly(line);
 
-    // Walk the dates on this line in order and assign them.
-    let di = 0;
-    // If the line has a name but no "check-in pending", attach name to current room first.
-    // We process dates, opening/closing rooms as pairs.
-    if (dates.length === 0) {
-      // no dates — pure attribute/guest line for the current room
-      if (current) attachAttributes(current, line, name, cost, isExtra);
+    // Pure name line (cell-per-line layout): buffer it until a room's dates appear.
+    if (looksLikeName(line)) {
+      // If we're mid-room (check-in seen, awaiting check-out) treat extra names as roommates (ignored for lead).
+      if (dateCount === 1) { /* roommate of current room, lead already set */ }
+      else pendingNames.push(line);
       continue;
     }
 
-    // Line HAS dates — may contain the guest name too (columnar layout)
-    for (di = 0; di < dates.length; di++) {
+    if (dates.length === 0) {
+      // attribute-only line (room type / counts / meal / cost / extra bed)
+      if (current) attachAttributes(current, line, cost, isExtra);
+      continue;
+    }
+
+    // Line HAS one or more dates. In columnar layout the guest name is on this same line.
+    const inlineName = nameOnly(line);
+    for (let di = 0; di < dates.length; di++) {
       if (dateCount === 0) {
-        // start a NEW room with this check-in
-        current = {
-          guests: [], checkIn: formatDate(dates[di], year), checkOut: "",
-          nights: 0, roomType: "Deluxe Room", meal: "", adults: 0, rate: 0, extra: 0,
-        };
-        data.rooms.push(current);
+        openRoom(formatDate(dates[di], year));
         dateCount = 1;
-        // the name on a check-in line belongs to this new room
-        if (di === 0 && name) current.guests.push(name.toUpperCase());
+        // columnar: name present on the check-in line itself
+        if (di === 0 && inlineName && looksLikeInlineName(inlineName) && !current.guests.length) {
+          current.guests.push(inlineName.toUpperCase());
+        }
       } else {
-        // this date is the check-out of the current room
         if (current) current.checkOut = formatDate(dates[di], year);
         dateCount = 0;
       }
     }
-    // attributes (room type / adults / nights / meal / cost) on the same line
-    if (current) attachAttributes(current, line, dates.length ? "" : name, cost, isExtra);
+    if (current) attachAttributes(current, line, cost, isExtra);
   }
 
-  function attachAttributes(room, line, name, cost, isExtra) {
-    const roomTypeM = line.match(/(Deluxe Room|Standard Room|Superior Room|Suite|Family Room)/i);
-    if (roomTypeM) room.roomType = titleCase(roomTypeM[1]);
-    const a = line.match(ADULT_RE); if (a && !room.adults) room.adults = parseInt(a[1], 10);
-    const n = line.match(NIGHTS_RE); if (n && !room.nights) room.nights = parseInt(n[1], 10);
-    const meal = line.match(MEAL_RE); if (meal && !room.meal) room.meal = meal[1].toUpperCase();
-    if (cost) {
-      if (isExtra) {
-        room.extra = parseFloat(cost[1]);
-        if (!room._costNights) room._costNights = parseInt(cost[2], 10);
-      } else if (!room.rate) {
-        room.rate = parseFloat(cost[1]);
-        room._costNights = parseInt(cost[2], 10);
-      }
-    }
-    if (name && !isExtra && !/^\s*$/.test(name)) room.guests.push(name.toUpperCase());
+  function looksLikeInlineName(name) {
+    const letters = name.replace(/[^A-Za-z]/g, "");
+    return letters.length >= 3 && !/^(X|AED|TOTAL)$/i.test(name.trim());
   }
 
   // Fallbacks
@@ -213,7 +233,7 @@ function render(data, nonRefundable) {
 
     return `${header}
       <table>
-        ${i === 0 ? tr("Hotel Confirmation", esc(data.confNumber)) : ""}
+        ${tr("Hotel Confirmation", esc(data.confNumber))}
         ${data.company ? tr("Company Name", esc(data.company.toUpperCase())) : ""}
         ${tr("Guest Name", esc(guest))}
         ${tr("Check In", esc(r.checkIn))}
