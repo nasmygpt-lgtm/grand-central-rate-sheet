@@ -559,6 +559,6 @@ function setOcr(cls, msg) {
   s.innerHTML = msg;
 }
 
-// start with example loaded and year defaulted to the current year
-el("input").value = EXAMPLE;
+// Start with an EMPTY paste box; the year defaults to the current year.
+// (Use the "Load Example" button to populate a sample booking.)
 el("year").value = String(new Date().getFullYear());
