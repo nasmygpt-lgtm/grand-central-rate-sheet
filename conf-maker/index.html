@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Grand Central Hotel — Confirmation Generator</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🏨</span>
+      <div>
+        <h1>Grand Central Hotel</h1>
+        <p>Reservation Confirmation Generator — Deira, Dubai</p>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h2>Booking Details</h2>
+      <p class="hint">Fill in the details below and click <strong>Generate</strong>. For multiple rooms, click <em>+ Add Room</em>.</p>
+
+      <div class="form-grid">
+        <label>Hotel Confirmation <input type="text" id="confNumber" placeholder="e.g. 35010 (leave blank if none)"></label>
+        <label>Company Name <input type="text" id="company" placeholder="e.g. Pace Tourism"></label>
+      </div>
+
+      <label class="checkbox-row">
+        <input type="checkbox" id="nonRefundable">
+        Non-Refundable booking (removes Cancellation / Early Departure / Payment notes)
+      </label>
+
+      <h3>Rooms</h3>
+      <div id="rooms"></div>
+      <button id="addRoomBtn" class="btn ghost">+ Add Room</button>
+
+      <div class="row actions">
+        <button id="generateBtn" class="btn primary">⚙️ Generate Confirmation</button>
+        <button id="resetBtn" class="btn ghost">Reset</button>
+      </div>
+    </section>
+
+    <section class="card" id="resultCard" hidden>
+      <h2>Confirmation</h2>
+      <div class="row result-actions">
+        <button id="copyHtmlBtn" class="btn secondary">📋 Copy (Email)</button>
+        <button id="copyTextBtn" class="btn secondary">📄 Copy (Plain Text)</button>
+        <button id="downloadBtn" class="btn secondary">⬇️ Download</button>
+        <button id="printBtn" class="btn ghost">🖨️ Print</button>
+      </div>
+      <div id="confirmationOutput" class="confirmation"></div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>Grand Central Hotel · Muraqqabat Street, Deira, Dubai</p>
+  </footer>
+
+  <template id="roomTemplate">
+    <div class="room-block">
+      <div class="room-block-head">
+        <span class="room-label">Room</span>
+        <button class="btn ghost remove-room" title="Remove room">✕</button>
+      </div>
+      <div class="form-grid">
+        <label>Guest Name (one lead guest) <input type="text" class="f-guests" placeholder="e.g. AMANDEEP SINGH KHANGURA"></label>
+        <label>Room Type <input type="text" class="f-roomtype" value="Deluxe Room"></label>
+        <label>Check In <input type="text" class="f-checkin" placeholder="e.g. 16th October 2025"></label>
+        <label>Check Out <input type="text" class="f-checkout" placeholder="e.g. 21st October 2025"></label>
+        <label>Nights <input type="number" class="f-nights" min="1" value="1"></label>
+        <label>Meal Plan <input type="text" class="f-meal" value="BB"></label>
+        <label>Adults <input type="number" class="f-adults" min="1" value="2"></label>
+        <label>Children <input type="number" class="f-children" min="0" value="0"></label>
+        <label>Rate per Night (AED) <input type="number" class="f-rate" step="0.01" placeholder="e.g. 200"></label>
+        <label>Extra Bed Fee / Night (AED) <input type="number" class="f-extra" step="0.01" value="0"></label>
+      </div>
+    </div>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
