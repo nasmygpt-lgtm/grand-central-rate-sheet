@@ -442,13 +442,7 @@ function render(data, nonRefundable) {
     <p>We are pleased to confirm your reservation in Dubai, as per the following details:</p>
     ${tables}
     ${grandHtml}
-    ${notes}
-    <p>Should you have any further concerns or feedback, please do not hesitate to reach out to us directly.</p>
-    <div class="sign">
-      <p>Thank you,</p>
-      <p>Kind Regards</p>
-      <p>🌿 P Please don't print this email unless you really need to</p>
-    </div>`;
+    ${notes}`;
 }
 
 /* =========================================================================
@@ -548,13 +542,7 @@ function renderEmail(data, nonRefundable) {
     ${blank}
     ${bold("Additional Notes:")}
     ${noteLines}
-    ${blank}
-    ${line("Should you have any further concerns or feedback, please do not hesitate to reach out to us directly.")}
-    ${blank}
-    ${line("Thank you,")}
-    ${line("Kind Regards")}
     ${SIGNATURE_IMG}
-    ${line(`<span style="color:#1a7a3a;font-weight:bold;">🌿 Please don't print this email unless you really need to</span>`)}
   </div>`;
 }
 
