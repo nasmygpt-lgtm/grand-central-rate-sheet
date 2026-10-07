@@ -591,8 +591,69 @@ document.querySelectorAll(".tab").forEach((tab) => {
     const which = tab.dataset.tab;
     el("panel-paste").hidden = which !== "paste";
     el("panel-upload").hidden = which !== "upload";
+    el("panel-pdf").hidden = which !== "pdf";
   });
 });
+
+/* =========================================================================
+   PDF UPLOAD (PDF.js — in-browser text extraction, no API key)
+   ========================================================================= */
+const pdfDropZone = el("pdfDropZone");
+const pdfInput = el("pdfInput");
+
+pdfDropZone.addEventListener("click", () => pdfInput.click());
+pdfDropZone.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") pdfInput.click(); });
+pdfInput.addEventListener("change", (e) => { if (e.target.files[0]) loadPdf(e.target.files[0]); });
+
+["dragenter", "dragover"].forEach((ev) => pdfDropZone.addEventListener(ev, (e) => { e.preventDefault(); pdfDropZone.classList.add("dragover"); }));
+["dragleave", "drop"].forEach((ev) => pdfDropZone.addEventListener(ev, (e) => { e.preventDefault(); pdfDropZone.classList.remove("dragover"); }));
+pdfDropZone.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) loadPdf(f); });
+
+function setPdf(cls, msg) {
+  const s = el("pdfStatus");
+  s.className = "status" + (cls ? " " + cls : "");
+  s.innerHTML = msg;
+}
+
+async function loadPdf(file) {
+  if (!file || !/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name)) {
+    return setPdf("err", "Please provide a PDF file.");
+  }
+  if (typeof pdfjsLib === "undefined") {
+    return setPdf("err", "PDF library failed to load (check your internet connection).");
+  }
+  setPdf("working", `<span class="spinner"></span>Reading PDF…`);
+  try {
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    let out = "";
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p);
+      const content = await page.getTextContent();
+      // Reconstruct lines using each item's Y position so labels/values stay together.
+      const rows = {};
+      for (const item of content.items) {
+        if (!item.str) continue;
+        const y = Math.round(item.transform[5]); // vertical position
+        (rows[y] = rows[y] || []).push({ x: item.transform[4], s: item.str });
+      }
+      const ys = Object.keys(rows).map(Number).sort((a, b) => b - a); // top-to-bottom
+      for (const y of ys) {
+        const lineText = rows[y].sort((a, b) => a.x - b.x).map((o) => o.s).join(" ")
+          .replace(/\s{2,}/g, " ").trim();
+        if (lineText) out += lineText + "\n";
+      }
+      out += "\n";
+    }
+    const text = out.trim();
+    if (!text) { setPdf("err", "No selectable text found in this PDF. Try the Upload Screenshot (OCR) tab instead."); return; }
+    el("input").value = text;
+    setPdf("ok", "✓ PDF text extracted. Switch to “Paste Text” to review, then Generate.");
+    document.querySelector('.tab[data-tab="paste"]').click();
+  } catch (err) {
+    setPdf("err", "Could not read PDF: " + err.message);
+  }
+}
 
 /* =========================================================================
    SCREENSHOT UPLOAD + OCR (Tesseract.js, no API key)

@@ -23,7 +23,21 @@
 
       <div class="tabs">
         <div class="tab active" data-tab="paste">📋 Paste Text</div>
+        <div class="tab" data-tab="pdf">📄 Upload PDF</div>
         <div class="tab" data-tab="upload">📸 Upload Screenshot</div>
+      </div>
+
+      <!-- PDF PANEL -->
+      <div id="panel-pdf" class="panel" hidden>
+        <p class="hint">Upload a booking PDF. The text is extracted in your browser (no API key) and appears in the Paste box — review it, then Generate.</p>
+        <div id="pdfDropZone" class="dropzone" tabindex="0">
+          <input type="file" id="pdfInput" accept="application/pdf,.pdf" hidden />
+          <div id="pdfDropPrompt" class="drop-prompt">
+            <span class="drop-icon">📄</span>
+            <p>Drop PDF here, or click to browse</p>
+          </div>
+        </div>
+        <p id="pdfStatus" class="status"></p>
       </div>
 
       <!-- UPLOAD PANEL -->
@@ -103,6 +117,14 @@ S.NO   NAME OF PAX              CHECK-IN  CHECK-OUT  ROOM DETAILS     ADULTS   N
   </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    // Point PDF.js at its worker (required for text extraction)
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    }
+  </script>
   <script src="app.js"></script>
 </body>
 </html>
