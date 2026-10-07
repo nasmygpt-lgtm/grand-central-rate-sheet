@@ -438,16 +438,11 @@ function render(data, nonRefundable) {
 
   return `
     <p>Dear Reservation Team,</p>
-    <p>Greetings from Grand Central Hotel,</p>
+    <p>Greetings,</p>
     <p>We are pleased to confirm your reservation at Grand Central Deira, Dubai, as per the following details:</p>
     ${tables}
     ${grandHtml}
     ${notes}
-    <p class="overview-title">Grand Central Hotel – Quick Overview</p>
-    <ul class="overview">
-      <li>⭐ <strong>Star Rating:</strong> Marketed as a 4 star property with 140 rooms. It's centrally located in Deira near Al Rigga Road. Muraqqabat Street - Deira - Dubai</li>
-      <li>📍 <strong>Location:</strong> Just a 3–4 minute walk (230 m) to Al Rigga Metro Station, offering seamless access to Dubai's transit network and attractions like Deira City Centre and the Dubai Museum</li>
-    </ul>
     <p>Should you have any further concerns or feedback, please do not hesitate to reach out to us directly.</p>
     <div class="sign">
       <p>Thank you,</p>
@@ -544,7 +539,7 @@ function renderEmail(data, nonRefundable) {
   return `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1a1a1a;">
     ${line("Dear Reservation Team,")}
     ${blank}
-    ${line("Greetings from Grand Central Hotel,")}
+    ${line("Greetings,")}
     ${blank}
     ${line("We are pleased to confirm your reservation at Grand Central Deira, Dubai, as per the following details:")}
     ${blank}
@@ -553,10 +548,6 @@ function renderEmail(data, nonRefundable) {
     ${blank}
     ${bold("Additional Notes:")}
     ${noteLines}
-    ${blank}
-    ${bold(`<span style="color:#1a4a7a;">Grand Central Hotel – Quick Overview</span>`)}
-    ${line(`⭐ <strong>Star Rating:</strong> Marketed as a 4 star property with 140 rooms. It's centrally located in Deira near Al Rigga Road. Muraqqabat Street - Deira - Dubai`)}
-    ${line(`📍 <strong>Location:</strong> Just a 3–4 minute walk (230 m) to Al Rigga Metro Station, offering seamless access to Dubai's transit network and attractions like Deira City Centre and the Dubai Museum`)}
     ${blank}
     ${line("Should you have any further concerns or feedback, please do not hesitate to reach out to us directly.")}
     ${blank}
