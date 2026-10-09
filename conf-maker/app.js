@@ -69,6 +69,12 @@ const CURRENT_YEAR = String(new Date().getFullYear());
 
 // Main entry: detect which kind of booking document this is and route to the right parser.
 function parseBooking(text, forcedYear) {
+  // "Grouped" format: guests listed under room-type headings (DOUBLE ROOM / TRIPLE ROOM)
+  // with a shared date range and a combined rate line.
+  const looksGrouped = /\b(DOUBLE|TRIPLE|TWIN|SINGLE|QUAD)\s*ROOM\s*:?/i.test(text) &&
+    /GUEST\s*NAMES?|RATE\s*:/i.test(text);
+  if (looksGrouped) return parseGrouped(text, forcedYear);
+
   // "Prose" formats (e.g. Dahr Tours) use free-text labels like "Lead Pax Name :",
   // "Date : Check in … check out …", "Room : … PER ROOM PER NIGHT".
   const looksProse = /Lead\s*Pax|Total\s*Pax|PER\s*ROOM\s*PER\s*NIGHT|Date\s*:\s*Check\s*in/i.test(text);
@@ -81,6 +87,129 @@ function parseBooking(text, forcedYear) {
   if (looksLabeled) return parseLabeled(text, forcedYear);
 
   return parseTabular(text, forcedYear);
+}
+
+/* ---- Format 4: GROUPED guests under room-type headings ---------------------
+   e.g.  12-16 NOVEMBER 2026
+         RATE: AED 285 PER ROOM PER NIGHT ... + AED 125 ... FOR EXTRA BED
+         GUEST NAMES:
+         DOUBLE ROOM
+         1).MR. THOMAS ...
+         2).MRS. AGNES ...
+         TRIPLE ROOM:
+         3).RUTH ... 4).NEWTON ... 5).JOSHUA ...
+---------------------------------------------------------------------------- */
+function parseGrouped(text, forcedYear) {
+  const data = { confNumber: "", company: "", rooms: [] };
+  const yearMatch = text.match(/\b(20\d{2})\b/);
+  const year = (forcedYear && String(forcedYear).trim()) || (yearMatch ? yearMatch[1] : CURRENT_YEAR);
+  const grab = (re) => { const m = text.match(re); return m ? m[1].trim() : ""; };
+
+  // Company (optional greeting)
+  const greet = text.match(/(?:Greetings?|Regards?)\s+from\s+(.+)/i);
+  if (greet) data.company = greet[1].replace(/[!*:,.]+\s*$/g, "").trim();
+
+  // Confirmation / Ref if present
+  const ref = grab(/\bRef\.?\s*:?\s*([A-Z0-9\-\/]{4,})/i);
+  if (ref) data.confNumber = ref;
+
+  // Shared date range: "12-16 NOVEMBER 2026" or "12 - 16 Nov 2026"
+  let checkIn = "", checkOut = "", nights = 0;
+  const range = text.match(/\b(\d{1,2})\s*[-–]\s*(\d{1,2})\s+([A-Za-z]{3,9})\s*[-–]?\s*(\d{4})?/);
+  if (range) {
+    const d1 = +range[1], d2 = +range[2], mon = monthName(range[3]), yr = range[4] || year;
+    checkIn = `${ordinal(d1)} ${mon} ${yr}`;
+    checkOut = `${ordinal(d2)} ${mon} ${yr}`;
+    if (d2 > d1) nights = d2 - d1;
+  } else {
+    const dates = findDates(text);
+    if (dates[0]) checkIn = formatDate(dates[0], year);
+    if (dates[1]) checkOut = formatDate(dates[1], year);
+    const a = parseDay(checkIn), b = parseDay(checkOut);
+    if (a != null && b != null && b > a) nights = b - a;
+  }
+
+  // Rates: base "AED 285 PER ROOM PER NIGHT" and extra bed "AED 125 ... FOR EXTRA BED".
+  // Capture the extra-bed amount FIRST (the AED value closest before "EXTRA BED"),
+  // then take the base rate as the first AED value that isn't the extra-bed one.
+  let baseRate = 0, extraBed = 0;
+  const extraM = text.match(/AED\s*([\d,]+(?:\.\d+)?)[^\n]{0,30}?(?:FOR\s*)?EXTRA\s*BED/i);
+  if (extraM) extraBed = parseFloat(extraM[1].replace(/,/g, ""));
+  const baseM = text.match(/AED\s*([\d,]+(?:\.\d+)?)\s*(?:NET\s*)?(?:PER\s*ROOM|\/?\s*PER\s*ROOM|PER\s*NIGHT|P\.?R\.?N)/i)
+    || text.match(/RATE\s*:?\s*AED\s*([\d,]+(?:\.\d+)?)/i);
+  if (baseM) baseRate = parseFloat(baseM[1].replace(/,/g, ""));
+  // Guard: if base accidentally equals the extra-bed figure, fall back to first AED amount.
+  if (baseRate && extraBed && baseRate === extraBed) {
+    const firstAed = text.match(/AED\s*([\d,]+(?:\.\d+)?)/i);
+    if (firstAed) baseRate = parseFloat(firstAed[1].replace(/,/g, ""));
+  }
+
+  // Default meal plan
+  let meal = "BB";
+  const mealM = text.match(/\b(BB|HB|FB|RO|AI)\s*BASIS\b/i) || text.match(/\bBASIS\b.*?\b(BB|HB|FB|RO|AI)\b/i);
+  if (mealM) meal = mealM[1].toUpperCase();
+
+  // Split guest section into room groups by room-type headings.
+  const guestSection = text.split(/GUEST\s*NAMES?\s*:?/i)[1] || text;
+  const headingRe = /\b(SINGLE|DOUBLE|TWIN|TRIPLE|QUAD|FAMILY)\s*ROOM\s*:?/gi;
+  const groups = [];
+  let match, lastIdx = null, lastType = null;
+  const indices = [];
+  while ((match = headingRe.exec(guestSection)) !== null) {
+    indices.push({ type: match[1].toUpperCase(), start: match.index, end: headingRe.lastIndex });
+  }
+  for (let i = 0; i < indices.length; i++) {
+    const seg = guestSection.slice(indices[i].end, i + 1 < indices.length ? indices[i + 1].start : undefined);
+    groups.push({ type: indices[i].type, body: seg });
+  }
+
+  const roomCapacity = { SINGLE: 1, DOUBLE: 2, TWIN: 2, TRIPLE: 3, QUAD: 4, FAMILY: 4 };
+
+  // Lines that are clearly NOT guest names (closings / notes) — stop collecting at these.
+  const stopRe = /^(waiting|thanks?|thank\s*you|regards?|best|kind|please|note|remarks?|rate\s*:|total|tdf|tourism)/i;
+
+  for (const g of groups) {
+    // Extract guest names — only from lines that are numbered or titled (Mr/Mrs/Ms) or
+    // plainly a name. Stop as soon as we hit a closing/non-guest line.
+    const names = [];
+    const lines = g.body.split(/\r?\n/);
+    for (let ln of lines) {
+      let s = ln.trim();
+      if (!s) continue;
+      if (stopRe.test(s)) break;                        // reached closing text → stop this group
+      const isNumbered = /^\s*\d+\s*[\).\.-]/.test(s);
+      const isTitled = /^(MR|MRS|MS|MISS|DR|MASTER)\b/i.test(s.replace(/^\s*\d+\s*[\).\.-]*\s*/, ""));
+      s = s.replace(/^\s*\d+\s*[\).\.-]*\s*/, "")       // "1)." / "3)."
+           .replace(/\b\d+\s*YRS?\b\.?/gi, "")           // "21YRS"
+           .replace(/\(.*?\)/g, "")
+           .replace(/[.\s]+$/,"")
+           .replace(/\s{2,}/g, " ")
+           .trim();
+      // Accept only if it was numbered/titled, or a plausible all-letters name (2+ words)
+      const plausible = isNumbered || isTitled || /^[A-Za-z][A-Za-z .'-]{3,}$/.test(s);
+      if (s && plausible && /[A-Za-z]{2,}/.test(s)) names.push(s.toUpperCase());
+    }
+    if (!names.length) continue;
+
+    const cap = roomCapacity[g.type] || 2;
+    const adults = names.length;             // count all listed as guests
+    // Triple/Quad with more guests than a double implies extra bed(s)
+    const extra = (g.type === "TRIPLE" || g.type === "QUAD") && extraBed ? extraBed : 0;
+
+    data.rooms.push({
+      guests: names,                          // lead = names[0] in render
+      checkIn, checkOut, nights: nights || 1,
+      roomType: titleCase(g.type + " ROOM"),
+      meal, adults, children: 0,
+      rate: baseRate, extra,
+    });
+  }
+
+  // If no groups found but a count line like "01 DBL + 1 TRIPLE ROOM" exists, still create rooms.
+  if (!data.rooms.length) {
+    data.rooms.push({ guests: [], checkIn, checkOut, nights: nights || 1, roomType: "Deluxe Room", meal, adults: 1, children: 0, rate: baseRate, extra: 0 });
+  }
+  return data;
 }
 
 /* ---- Format 3: PROSE / free-text labels (Dahr Tours-style) ------------------ */
