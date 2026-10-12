@@ -69,6 +69,12 @@ const CURRENT_YEAR = String(new Date().getFullYear());
 
 // Main entry: detect which kind of booking document this is and route to the right parser.
 function parseBooking(text, forcedYear) {
+  // "PMS form" screenshot (e.g. GCH reservation screen): has Arrival + Departure + a
+  // "Reservation <no>" header, Name/First Name, Agent, Room Type, Rate Code, Rate/Total.
+  const looksPms = /\bReservation\s+\d{3,}/i.test(text) ||
+    (/\bArrival\b/i.test(text) && /\bDeparture\b/i.test(text) && /No\.?\s*of\s*Rms/i.test(text));
+  if (looksPms) return parsePms(text, forcedYear);
+
   // "Group colon-labelled" format (e.g. Bedouin Trips): BOOKING REF :, HOTEL :, NAME :,
   // CHECK IN :, CHECK OUT :, Number of rooms :, Rate :, TD FEE :.
   const looksGroupLabeled = /Number\s*of\s*rooms?\s*:/i.test(text) &&
@@ -93,6 +99,91 @@ function parseBooking(text, forcedYear) {
   if (looksLabeled) return parseLabeled(text, forcedYear);
 
   return parseTabular(text, forcedYear);
+}
+
+/* ---- Format 6: PMS reservation screen (GCH-style screenshot) ----------------
+   Title: "GCH - Reservation 64179 RESERVED"
+   Name: MANGAT | First Name: SARPREET KAUR | Agent: Ghai Holidays
+   Arrival: 13/10/26 | Departure: 19/10/26 | Nights: 6
+   Adults 1 Child 0 | No. of Rms. 1 | Room Type DDN | Rate Code TA-BB
+   Rate 200.00 | Total 215.00
+---------------------------------------------------------------------------- */
+function parsePms(text, forcedYear) {
+  const data = { confNumber: "", company: "", rooms: [] };
+  const yearMatch = text.match(/\b(20\d{2})\b/);
+  const year = (forcedYear && String(forcedYear).trim()) || (yearMatch ? yearMatch[1] : CURRENT_YEAR);
+  const grab = (re) => { const m = text.match(re); return m ? m[1].trim() : ""; };
+
+  // Confirmation: "Reservation 64179"
+  const conf = grab(/Reservation\s+(\d{3,})/i);
+  if (conf) data.confNumber = conf;
+
+  // Company / Agent
+  const agent = grab(/\bAgent\b\s*:?\s*([A-Za-z][A-Za-z0-9 &.'-]{2,40})/i);
+  if (agent) data.company = agent.replace(/\s{2,}/g, " ").trim();
+
+  // Guest name: "Name MANGAT" (surname) + "First Name SARPREET KAUR".
+  // OCR often puts other labels after the value on the same line, so cut the value at the
+  // next known label keyword, and extract First Name FIRST (so "Name" doesn't grab it).
+  const LABELS = "Phone|Agent|Member|Company|Group|Source|Title|Country|VIP|Language|First\\s*Name|Res\\.?\\s*Type|Market";
+  const cutAtLabel = (s) => (s || "").split(new RegExp(`\\s+(?:${LABELS})\\b`, "i"))[0].replace(/\s{2,}/g, " ").trim();
+
+  const firstName = cutAtLabel(grab(/First\s*Name\s+([A-Za-z][A-Za-z'’ .-]{1,40})/i));
+  // For surname, match "Name" that is NOT preceded by "First " and stop before the next label.
+  let surname = "";
+  const nameMatch = text.match(/(?:^|[^A-Za-z])Name\s+([A-Za-z][A-Za-z'’ .-]{1,40})/i);
+  if (nameMatch) surname = cutAtLabel(nameMatch[1]);
+
+  let guest = "";
+  if (firstName && surname) guest = `${firstName} ${surname}`;
+  else guest = (firstName || surname || "").trim();
+
+  // Dates: Arrival / Departure in dd/mm/yy or dd/mm/yyyy
+  const normSlash = (s) => {
+    const m = (s || "").match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+    if (!m) return "";
+    const day = +m[1], monIdx = +m[2] - 1, yr = m[3].length === 2 ? "20" + m[3] : m[3];
+    const monNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+    return `${ordinal(day)} ${monNames[monIdx] || ""} ${yr}`;
+  };
+  const checkIn = normSlash(grab(/Arrival\s*:?\s*([0-9]{1,2}\/[0-9]{1,2}\/[0-9]{2,4})/i));
+  const checkOut = normSlash(grab(/Departure\s*:?\s*([0-9]{1,2}\/[0-9]{1,2}\/[0-9]{2,4})/i));
+  let nights = parseInt(grab(/Nights?\s*:?\s*0*(\d+)/i) || "0", 10);
+  if (!nights) { const a = parseDay(checkIn), b = parseDay(checkOut); if (a != null && b != null && b > a) nights = b - a; }
+
+  // Occupancy
+  const adults = parseInt(grab(/Adults?\s*:?\s*0*(\d+)/i) || "1", 10);
+  const children = parseInt(grab(/Child(?:ren)?\s*:?\s*0*(\d+)/i) || "0", 10);
+  const roomCount = parseInt(grab(/No\.?\s*of\s*Rms?\.?\s*:?\s*0*(\d+)/i) || "1", 10);
+
+  // Room type: code like DDN -> Deluxe (best-effort); keep code if unknown.
+  const rtCode = grab(/Room\s*Type\s*:?\s*([A-Z]{2,4})/i);
+  const RT_MAP = { DDN: "Deluxe Room", DBL: "Double Room", STD: "Standard Room", SUP: "Superior Room", STU: "Studio", SUITE: "Suite" };
+  let roomType = RT_MAP[(rtCode || "").toUpperCase()] || (rtCode ? rtCode.toUpperCase() : "Deluxe Room");
+
+  // Meal plan from Rate Code "TA-BB" / "RO" etc.
+  let meal = "";
+  const rateCode = grab(/Rate\s*Code\s*:?\s*([A-Z0-9\-]+)/i);
+  const mealM = (rateCode || text).match(/\b(BB|HB|FB|RO|AI|CP|MAP|AP|EP)\b/i);
+  if (mealM) meal = mealM[1].toUpperCase();
+
+  // Rate and Total. The "Total" here is the per-night figure INCLUDING TD (Tourism Dirham).
+  // e.g. Rate 200 + TD 15 = Total 215. Capture the difference as the TD per night.
+  const rate = parseFloat((grab(/\bRate\s*:?\s*([\d,]+(?:\.\d+)?)/i) || "0").replace(/,/g, ""));
+  const total = parseFloat((grab(/\bTotal\s*:?\s*([\d,]+(?:\.\d+)?)/i) || "0").replace(/,/g, ""));
+  let td = 0;
+  if (total && rate && total > rate) td = +(total - rate).toFixed(2);
+
+  for (let i = 0; i < (roomCount || 1); i++) {
+    data.rooms.push({
+      guests: i === 0 && guest ? [guest.toUpperCase()] : [],
+      checkIn, checkOut, nights: nights || 1,
+      roomType, meal: meal || "BB",
+      adults: adults || 1, children,
+      rate, extra: 0, td,          // TD (e.g. 15) shown in the rate breakdown
+    });
+  }
+  return data;
 }
 
 /* ---- Format 5: GROUP colon-labelled (Bedouin Trips-style) -------------------
