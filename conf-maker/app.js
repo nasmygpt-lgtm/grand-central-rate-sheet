@@ -238,15 +238,33 @@ function parseProse(text, forcedYear) {
       .trim();
   }
 
-  // Dates: "Check in 07 check out 13 October - 2026"  OR  "Check in 07-Oct check out 13-Oct"
+  // Dates — handle several wordings:
+  //  "Check in 07 check out 13 October - 2026"
+  //  "Check in -NOV 9-14 - 2026"           (month BEFORE the day range)
+  //  "Check in 07-Oct check out 13-Oct"
   let checkIn = "", checkOut = "", nights = 0;
-  const dm = text.match(/check\s*in\s*([0-9]{1,2})(?:\s*[A-Za-z]{0,9})?\s*(?:to|-|–|check\s*out)\s*([0-9]{1,2})\s*([A-Za-z]{3,9})?\s*[-–]?\s*(\d{4})?/i);
+  const MON = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec";
+
+  // (a) month-first range: "NOV 9-14 - 2026" or "NOVEMBER 9 - 14 2026"
+  let dm = text.match(new RegExp(`(?:check\\s*in\\s*[-–]?\\s*)?\\b(${MON})[A-Za-z]*\\s*(\\d{1,2})\\s*[-–]\\s*(\\d{1,2})\\s*[-–]?\\s*(\\d{4})?`, "i"));
   if (dm) {
-    const d1 = dm[1], d2 = dm[2], mon = dm[3] || "", yr = dm[4] || year;
-    checkIn = formatDate(`${d1}-${mon}`.replace(/-$/, ""), yr) || `${ordinal(+d1)} ${monthName(mon)} ${yr}`;
-    checkOut = formatDate(`${d2}-${mon}`.replace(/-$/, ""), yr) || `${ordinal(+d2)} ${monthName(mon)} ${yr}`;
-    if (+d2 > +d1) nights = +d2 - +d1;
-  } else {
+    const mon = monthName(dm[1]), d1 = +dm[2], d2 = +dm[3], yr = dm[4] || year;
+    checkIn = `${ordinal(d1)} ${mon} ${yr}`;
+    checkOut = `${ordinal(d2)} ${mon} ${yr}`;
+    if (d2 > d1) nights = d2 - d1;
+  }
+  // (b) day-first with check in/out: "Check in 07 check out 13 October - 2026"
+  if (!checkIn) {
+    dm = text.match(/check\s*in\s*([0-9]{1,2})(?:\s*[A-Za-z]{0,9})?\s*(?:to|-|–|check\s*out)\s*([0-9]{1,2})\s*([A-Za-z]{3,9})?\s*[-–]?\s*(\d{4})?/i);
+    if (dm) {
+      const d1 = +dm[1], d2 = +dm[2], mon = dm[3] || "", yr = dm[4] || year;
+      checkIn = mon ? `${ordinal(d1)} ${monthName(mon)} ${yr}` : formatDate(String(d1), yr);
+      checkOut = mon ? `${ordinal(d2)} ${monthName(mon)} ${yr}` : formatDate(String(d2), yr);
+      if (d2 > d1) nights = d2 - d1;
+    }
+  }
+  // (c) fallback: any two dates in the text
+  if (!checkIn) {
     const dates = findDates(text);
     if (dates[0]) checkIn = formatDate(dates[0], year);
     if (dates[1]) checkOut = formatDate(dates[1], year);
@@ -257,9 +275,9 @@ function parseProse(text, forcedYear) {
   // Adults: "Total Pax : 01 ADULTS"
   const adults = parseInt(grab(/Total\s*Pax\s*:?\s*0*(\d+)/i) || grab(/0*(\d+)\s*ADULTS?/i) || "1", 10);
 
-  // Room + rate + meal: "Room :01 DELUXE ROOM BB BASIS – 185 AED / - PER ROOM PER NIGHT BB"
+  // Room line: "Room :02 DELUXE ROOM BB BASIS + EB"
   const roomLine = grab(/Room\s*:?\s*([^\n\r]+)/i);
-  let roomType = "Deluxe Room", meal = "", rate = 0, roomCount = 1;
+  let roomType = "Deluxe Room", meal = "", roomCount = 1;
   const hotelLine = grab(/Hotel\s*:?\s*([^\n\r]+)/i);
   if (roomLine) {
     const rc = roomLine.match(/^0*(\d+)\s/); if (rc) roomCount = parseInt(rc[1], 10);
@@ -267,19 +285,47 @@ function parseProse(text, forcedYear) {
     if (rtM) roomType = titleCase(rtM[1]);
     const mealM = roomLine.match(/\b(BB|HB|FB|RO|AI|CP|MAP|AP|EP)\b/i);
     if (mealM) meal = mealM[1].toUpperCase();
-    const rateM = roomLine.match(/([\d,]+(?:\.\d+)?)\s*AED/i) || roomLine.match(/AED\s*([\d,]+(?:\.\d+)?)/i);
-    if (rateM) rate = parseFloat(rateM[1].replace(/,/g, ""));
   }
   if (!meal && hotelLine) { const m = hotelLine.match(/\b(BB|HB|FB|RO|AI)\b/i); if (m) meal = m[1].toUpperCase(); }
 
-  // Build one room per room-count (same details) — usually 1.
+  // Rate — can be on the Room line OR a separate line. Handle several styles:
+  //   "185 AED / - PER ROOM PER NIGHT"
+  //   "270+15 & eb 125 / - PER ROOM PER NIGHT"   (base 270+15, extra bed 125)
+  //   "AED 285 ... + AED 125 ... EXTRA BED"
+  let rate = 0, extra = 0;
+  // Extra bed first (so we don't mistake it for the base). Keep it on the SAME line:
+  // match "eb 125" / "e.b 125" / "extra bed 125" where digits follow on the same line
+  // (use [ \t]* so a newline can't let it grab a number from the next line, e.g. "+ EB\n270").
+  const ebM = text.match(/\be\.?\s*b\.?[ \t]*([\d,]+(?:\.\d+)?)/i)
+    || text.match(/extra\s*bed[^\n\d]{0,10}([\d,]+(?:\.\d+)?)/i)
+    || text.match(/([\d,]+(?:\.\d+)?)[ \t]{0,20}(?:for\s*)?extra\s*bed/i);
+  if (ebM) extra = parseFloat(ebM[1].replace(/,/g, ""));
+  // Base rate: a "a+b" pair (e.g. 270+15) sums into the per-room rate.
+  const sumM = text.match(/\b(\d+(?:\.\d+)?)\s*\+\s*(\d+(?:\.\d+)?)\b/);
+  if (sumM) {
+    rate = parseFloat(sumM[1]) + parseFloat(sumM[2]);
+  } else {
+    const rM = (roomLine && (roomLine.match(/([\d,]+(?:\.\d+)?)\s*AED/i) || roomLine.match(/AED\s*([\d,]+(?:\.\d+)?)/i)))
+      || text.match(/AED\s*([\d,]+(?:\.\d+)?)\s*(?:PER\s*ROOM|PER\s*NIGHT)/i)
+      || text.match(/([\d,]+(?:\.\d+)?)\s*(?:\/\s*-\s*)?PER\s*ROOM/i);
+    if (rM) rate = parseFloat(rM[1].replace(/,/g, ""));
+  }
+
+  // Distribute guests/adults across rooms. The lead name applies to the first room;
+  // remaining adults are spread so each room shows a sensible occupancy.
+  const totalAdults = adults || 1;
+  const perRoom = Math.max(1, Math.round(totalAdults / (roomCount || 1)));
   for (let i = 0; i < (roomCount || 1); i++) {
+    // extra bed applies when a room holds 3+ guests (triple occupancy)
+    const roomAdults = (i === roomCount - 1)
+      ? totalAdults - perRoom * (roomCount - 1)   // remainder to last room
+      : perRoom;
     data.rooms.push({
-      guests: guest ? [guest.toUpperCase()] : [],
+      guests: i === 0 && guest ? [guest.toUpperCase()] : [],
       checkIn, checkOut, nights: nights || 1,
       roomType, meal: meal || "BB",
-      adults: adults || 1, children: 0,
-      rate, extra: 0,
+      adults: roomAdults > 0 ? roomAdults : perRoom, children: 0,
+      rate, extra: (roomAdults >= 3 ? extra : (roomCount === 1 ? extra : 0)),
     });
   }
   return data;
