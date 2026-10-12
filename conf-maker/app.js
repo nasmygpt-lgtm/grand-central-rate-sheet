@@ -720,6 +720,10 @@ function render(data, nonRefundable) {
   const grandHtml = (multi || isGroup) ? `<p class="rate-total" style="text-align:right;">Grand Total = AED ${num(grand)}</p>` : "";
 
   const nr = nonRefundable;
+  // Group bookings get extra deposit / final-balance remarks.
+  const groupNotes = isGroup ? `
+      <li>✔ <strong>Deposit:</strong> A 50% advance payment of the total reservation amount is required 14 days prior to the guest's arrival date to guarantee and secure the booking.</li>
+      <li>✔ <strong>Final Balance:</strong> The remaining 50% balance is due and payable no later than 2 days prior to arrival.</li>` : "";
   const notes = `
     <p class="notes-title">Additional Notes:</p>
     <ul class="notes">
@@ -727,7 +731,7 @@ function render(data, nonRefundable) {
       <li>✔ <strong>Check-in/out Times:</strong> 14:00 (2 PM) / 12:00 (Noon)</li>
       ${nr ? "" : `<li>✔ <strong>Cancellation Policy:</strong> Free cancellation until 14 days before arrival. Late cancellations incur one night's charge.</li>
       <li>✔ <strong>Early Departure:</strong> 50% penalty charges applicable</li>
-      <li>✔ <strong>Payment:</strong> Room charges to be settled 14 days before arrival</li>`}
+      <li>✔ <strong>Payment:</strong> Room charges to be settled 14 days before arrival</li>`}${groupNotes}
       <li>✔ <strong>Parking:</strong> Basement paid parking available at AED 25 per day.</li>
       <li>✔ <strong>Visitor Policy:</strong> Only registered guests are permitted in the room. Any additional visitors beyond the booked occupancy will be subject to additional charges as per the hotel policy.</li>
     </ul>`;
@@ -849,6 +853,10 @@ function renderEmail(data, nonRefundable) {
       `✔ <strong>Early Departure:</strong> 50% penalty charges applicable`,
       `✔ <strong>Payment:</strong> Room charges to be settled 14 days before arrival`,
     ]),
+    ...(isGroup ? [
+      `✔ <strong>Deposit:</strong> A 50% advance payment of the total reservation amount is required 14 days prior to the guest's arrival date to guarantee and secure the booking.`,
+      `✔ <strong>Final Balance:</strong> The remaining 50% balance is due and payable no later than 2 days prior to arrival.`,
+    ] : []),
     `✔ <strong>Parking:</strong> Basement paid parking available at AED 25 per day.`,
     `✔ <strong>Visitor Policy:</strong> Only registered guests are permitted in the room. Any additional visitors beyond the booked occupancy will be subject to additional charges as per the hotel policy.`,
   ].map(line).join("");
