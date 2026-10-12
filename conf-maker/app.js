@@ -69,11 +69,20 @@ const CURRENT_YEAR = String(new Date().getFullYear());
 
 // Main entry: detect which kind of booking document this is and route to the right parser.
 function parseBooking(text, forcedYear) {
-  // "PMS form" screenshot (e.g. GCH reservation screen): has Arrival + Departure + a
-  // "Reservation <no>" header, Name/First Name, Agent, Room Type, Rate Code, Rate/Total.
-  const looksPms = /\bReservation\s+\d{3,}/i.test(text) ||
-    (/\bArrival\b/i.test(text) && /\bDeparture\b/i.test(text) && /No\.?\s*of\s*Rms/i.test(text));
-  if (looksPms) return parsePms(text, forcedYear);
+  // "PMS form" screenshot (e.g. GCH reservation screen). OCR mangles this heavily, so detect
+  // it loosely: any mix of these PMS-specific tokens (allowing OCR typos like "Arrval",
+  // "No.ofRms", "RoomType", "RTC", "Rate Code").
+  const pmsHits = [
+    /\bReservation\s+\d{2,}/i,
+    /\bArr?i?v?al\b/i,           // Arrival / Arrval
+    /\bDeparture\b/i,
+    /No\.?\s*of\s*Rms?/i,
+    /Room\s*Type/i,
+    /\bRTC\b/i,
+    /Rate\s*Code/i,
+    /Res\.?\s*Type/i,
+  ].filter((re) => re.test(text)).length;
+  if (pmsHits >= 2) return parsePms(text, forcedYear);
 
   // "Group colon-labelled" format (e.g. Bedouin Trips): BOOKING REF :, HOTEL :, NAME :,
   // CHECK IN :, CHECK OUT :, Number of rooms :, Rate :, TD FEE :.
@@ -138,50 +147,37 @@ function parsePms(text, forcedYear) {
   if (firstName && surname) guest = `${firstName} ${surname}`;
   else guest = (firstName || surname || "").trim();
 
-  // Dates: Arrival / Departure in dd/mm/yy or dd/mm/yyyy
-  const normSlash = (s) => {
-    const m = (s || "").match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
-    if (!m) return "";
-    const day = +m[1], monIdx = +m[2] - 1, yr = m[3].length === 2 ? "20" + m[3] : m[3];
-    const monNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-    return `${ordinal(day)} ${monNames[monIdx] || ""} ${yr}`;
+  // Dates — OCR may give "13/10/26" OR a bracketed run like "[191025]" (ddmmyy, slashes lost).
+  const monNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const fmt = (day, mon, yr) => `${ordinal(day)} ${monNames[mon - 1] || ""} ${yr.length === 2 ? "20" + yr : yr}`;
+  const parseAnyDate = (s) => {
+    if (!s) return "";
+    let m = s.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);     // 13/10/26
+    if (m) return fmt(+m[1], +m[2], m[3]);
+    m = s.match(/\b(\d{2})(\d{2})(\d{2})\b/);                          // 191025 -> 19/10/25
+    if (m) return fmt(+m[1], +m[2], m[3]);
+    return "";
   };
-  const checkIn = normSlash(grab(/Arrival\s*:?\s*([0-9]{1,2}\/[0-9]{1,2}\/[0-9]{2,4})/i));
-  const checkOut = normSlash(grab(/Departure\s*:?\s*([0-9]{1,2}\/[0-9]{1,2}\/[0-9]{2,4})/i));
-  let nights = parseInt(grab(/Nights?\s*:?\s*0*(\d+)/i) || "0", 10);
+  // Grab the chunk right after the label (through to the next label), then pull a date from it.
+  const afterLabel = (labelRe) => {
+    const m = text.match(labelRe);
+    return m ? text.slice(m.index, m.index + 40) : "";
+  };
+  const checkIn = parseAnyDate(afterLabel(/Arr?i?v?al/i));
+  const checkOut = parseAnyDate(afterLabel(/Departure/i));
+
+  // Nights — tolerate "[5__|" junk; take the first digit group after "Nights".
+  let nights = parseInt((afterLabel(/Nights?/i).match(/Nights?\D{0,4}(\d+)/i) || [])[1] || "0", 10);
   if (!nights) { const a = parseDay(checkIn), b = parseDay(checkOut); if (a != null && b != null && b > a) nights = b - a; }
 
-  // Occupancy
-  const adults = parseInt(grab(/Adults?\s*:?\s*0*(\d+)/i) || "1", 10);
-  const children = parseInt(grab(/Child(?:ren)?\s*:?\s*0*(\d+)/i) || "0", 10);
-  const roomCount = parseInt(grab(/No\.?\s*of\s*Rms?\.?\s*:?\s*0*(\d+)/i) || "1", 10);
+  // Occupancy — tolerate OCR noise ("dus [1]" for Adults, "chido" for Child)
+  const adults = parseInt((text.match(/(?:Adults?|dus)\D{0,4}(\d+)/i) || [])[1] || "1", 10);
+  const children = parseInt((text.match(/(?:Child(?:ren)?|chi\w*)\D{0,4}(\d+)/i) || [])[1] || "0", 10);
+  const roomCount = parseInt((text.match(/No\.?\s*of\s*Rms?\.?\D{0,4}(\d+)/i) || [])[1] || "1", 10);
 
-  // Room type. OCR of the PMS screen can be messy, so try several patterns and allow a few
-  // junk characters (dropdown arrows, dots) between the label and the code. Try "Room Type"
-  // first, then "RTC" (same code on this screen). Keep the raw code if it isn't in the map.
-  let rtCode =
-       grab(/Room\s*Type\s*[:：]?\s*[^A-Za-z0-9]{0,4}([A-Za-z0-9]{2,5})/i)
-    || grab(/\bRTC\b\s*[:：]?\s*[^A-Za-z0-9]{0,4}([A-Za-z0-9]{2,5})/i);
-  rtCode = (rtCode || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  // Common OCR confusions: O<->0, I/L<->1
-  const rtNorm = rtCode.replace(/0/g, "D").replace(/[1IL]/g, "D"); // helps "0DN"/"1DN" -> "DDN" guess (best-effort only)
-  const RT_MAP = {
-    DDN: "Deluxe Room", DLX: "Deluxe Room", DEL: "Deluxe Room", DD: "Deluxe Room",
-    DBL: "Double Room", DBD: "Double Room",
-    STD: "Standard Room", STN: "Standard Room", STDN: "Standard Room",
-    SUP: "Superior Room", SUPN: "Superior Room",
-    STU: "Studio", STUDIO: "Studio",
-    SUITE: "Suite", STE: "Suite", JST: "Junior Suite",
-    TWN: "Twin Room", TWD: "Twin Room",
-    TRP: "Triple Room", TRD: "Triple Room",
-    FAM: "Family Room", FMD: "Family Room", QUAD: "Quad Room",
-    EXE: "Executive Room", KNG: "King Room", QEN: "Queen Room",
-  };
-  let roomType;
-  if (RT_MAP[rtCode]) roomType = RT_MAP[rtCode];
-  else if (RT_MAP[rtNorm]) roomType = RT_MAP[rtNorm];
-  else if (rtCode) roomType = rtCode;                 // show the raw code so it's visible/fixable
-  else roomType = "Deluxe Room";                      // only default when nothing was read
+  // Room type: default is always Deluxe Room (per hotel standard). OCR of the room-type code
+  // on this screen is unreliable, so we don't try to parse it — just use the default.
+  const roomType = "Deluxe Room";
 
   // Meal plan from Rate Code "TA-BB" / "RO" etc.
   let meal = "";
