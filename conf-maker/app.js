@@ -156,10 +156,32 @@ function parsePms(text, forcedYear) {
   const children = parseInt(grab(/Child(?:ren)?\s*:?\s*0*(\d+)/i) || "0", 10);
   const roomCount = parseInt(grab(/No\.?\s*of\s*Rms?\.?\s*:?\s*0*(\d+)/i) || "1", 10);
 
-  // Room type: code like DDN -> Deluxe (best-effort); keep code if unknown.
-  const rtCode = grab(/Room\s*Type\s*:?\s*([A-Z]{2,4})/i);
-  const RT_MAP = { DDN: "Deluxe Room", DBL: "Double Room", STD: "Standard Room", SUP: "Superior Room", STU: "Studio", SUITE: "Suite" };
-  let roomType = RT_MAP[(rtCode || "").toUpperCase()] || (rtCode ? rtCode.toUpperCase() : "Deluxe Room");
+  // Room type. OCR of the PMS screen can be messy, so try several patterns and allow a few
+  // junk characters (dropdown arrows, dots) between the label and the code. Try "Room Type"
+  // first, then "RTC" (same code on this screen). Keep the raw code if it isn't in the map.
+  let rtCode =
+       grab(/Room\s*Type\s*[:：]?\s*[^A-Za-z0-9]{0,4}([A-Za-z0-9]{2,5})/i)
+    || grab(/\bRTC\b\s*[:：]?\s*[^A-Za-z0-9]{0,4}([A-Za-z0-9]{2,5})/i);
+  rtCode = (rtCode || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  // Common OCR confusions: O<->0, I/L<->1
+  const rtNorm = rtCode.replace(/0/g, "D").replace(/[1IL]/g, "D"); // helps "0DN"/"1DN" -> "DDN" guess (best-effort only)
+  const RT_MAP = {
+    DDN: "Deluxe Room", DLX: "Deluxe Room", DEL: "Deluxe Room", DD: "Deluxe Room",
+    DBL: "Double Room", DBD: "Double Room",
+    STD: "Standard Room", STN: "Standard Room", STDN: "Standard Room",
+    SUP: "Superior Room", SUPN: "Superior Room",
+    STU: "Studio", STUDIO: "Studio",
+    SUITE: "Suite", STE: "Suite", JST: "Junior Suite",
+    TWN: "Twin Room", TWD: "Twin Room",
+    TRP: "Triple Room", TRD: "Triple Room",
+    FAM: "Family Room", FMD: "Family Room", QUAD: "Quad Room",
+    EXE: "Executive Room", KNG: "King Room", QEN: "Queen Room",
+  };
+  let roomType;
+  if (RT_MAP[rtCode]) roomType = RT_MAP[rtCode];
+  else if (RT_MAP[rtNorm]) roomType = RT_MAP[rtNorm];
+  else if (rtCode) roomType = rtCode;                 // show the raw code so it's visible/fixable
+  else roomType = "Deluxe Room";                      // only default when nothing was read
 
   // Meal plan from Rate Code "TA-BB" / "RO" etc.
   let meal = "";
