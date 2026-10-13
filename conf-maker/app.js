@@ -263,10 +263,10 @@ function parseUptown(text, forcedYear) {
   // Shared meal type
   let meal = (grab(/Meal\s*Type\s*:?\s*([A-Za-z]{2,4})/i) || "").toUpperCase() || "RO";
 
-  // Determine the per-night rate / room-type info from the HEADER (shared across rooms when
-  // not repeated inside each room block).
-  const sharedRateLine = text.match(/(?:Deluxe|Standard|Superior|Suite|Room)[^\n=]*=\s*[^=\n]*=\s*([\d,]+(?:\.\d+)?)\s*AED/i)
-    || text.match(/=\s*([\d,]+(?:\.\d+)?)\s*AED/i);
+  // Determine the per-night rate from the HEADER room-type line (NOT a "* Nights = total"
+  // line). Match only up to the end of that line so a grand total can never be captured.
+  const sharedRateLine = text.match(/(?:Deluxe|Standard|Superior|Suite|Room)[^\n]*?=\s*[^\n=]*=\s*([\d,]+(?:\.\d+)?)\s*AED/i)
+    || text.match(/(?:Deluxe|Standard|Superior|Suite|Room)[^\n]*?=\s*([\d,]+(?:\.\d+)?)\s*AED/i);
   const sharedRate = sharedRateLine ? parseFloat(sharedRateLine[1].replace(/,/g, "")) : 0;
 
   // Split into "Room N" blocks. Each real block starts at a "Room <n>" marker; drop the
@@ -290,15 +290,22 @@ function parseUptown(text, forcedYear) {
       .replace(/\s{2,}/g, " ")
       .trim();
 
-    // Rate: prefer the final value after "=" in "Deluxe Room = 135- 5% = 128.25 AED",
-    // else the per-night value in "128.25 * 1 Night = 128.25", else the shared header rate.
-    let rate = 0;
-    const rtLine = blk.match(/(?:Deluxe|Standard|Superior|Suite|Room)[^\n=]*=\s*[^=\n]*=\s*([\d,]+(?:\.\d+)?)\s*AED/i)
-      || blk.match(/=\s*([\d,]+(?:\.\d+)?)\s*AED/i);
-    if (rtLine) rate = parseFloat(rtLine[1].replace(/,/g, ""));
+    // Rate = PER-NIGHT value. Priority order (never use the grand total):
+    //  1) The number BEFORE "* N Nights"  →  "128.25 * 2 Nights = 256.5"  →  128.25
+    //  2) The room-type line's final value →  "Deluxe Room = 135- 5% = 128.25 AED" → 128.25
+    //  3) The shared header rate
+    let rate = 0, nights = 0;
     const perNight = blk.match(/([\d,]+(?:\.\d+)?)\s*\*\s*(\d+)\s*Nights?/i);
-    let nights = 0;
-    if (perNight) { if (!rate) rate = parseFloat(perNight[1].replace(/,/g, "")); nights = parseInt(perNight[2], 10); }
+    if (perNight) {
+      rate = parseFloat(perNight[1].replace(/,/g, ""));   // the per-night figure
+      nights = parseInt(perNight[2], 10);
+    }
+    if (!rate) {
+      // room-type line only (stop at end of that line so we never catch a Nights total)
+      const rtLine = blk.match(/(?:Deluxe|Standard|Superior|Suite|Room)[^\n]*?=\s*[^\n=]*=\s*([\d,]+(?:\.\d+)?)\s*AED/i)
+        || blk.match(/(?:Deluxe|Standard|Superior|Suite|Room)[^\n]*?=\s*([\d,]+(?:\.\d+)?)\s*AED/i);
+      if (rtLine) rate = parseFloat(rtLine[1].replace(/,/g, ""));
+    }
     if (!rate) rate = sharedRate;
 
     // Dates: block-specific if present, else shared
