@@ -96,6 +96,12 @@ function parseBooking(text, forcedYear) {
     /CHECK\s*IN\s*:/i.test(text) && /\bRate\b\s*:/i.test(text);
   if (looksGroupLabeled) return parseGroupLabeled(text, forcedYear);
 
+  // "Per-date rate" group format: a "ROOM RATE AS FOLLOWS" block with one line per date,
+  // and a GUEST NAMES table with DBL/TWN/SGL ROOM types.
+  const looksPerDate = /ROOM\s*RATE\s*AS\s*FOLLOWS/i.test(text) ||
+    (/GUEST\s*NAMES?/i.test(text) && /\b(DBL|TWN|SGL|TRP)\s*ROOM\b/i.test(text));
+  if (looksPerDate) return parsePerDate(text, forcedYear);
+
   // "Grouped" format: guests listed under room-type headings (DOUBLE ROOM / TRIPLE ROOM)
   // with a shared date range and a combined rate line.
   const looksGrouped = /\b(DOUBLE|TRIPLE|TWIN|SINGLE|QUAD)\s*ROOM\s*:?/i.test(text) &&
@@ -114,6 +120,108 @@ function parseBooking(text, forcedYear) {
   if (looksLabeled) return parseLabeled(text, forcedYear);
 
   return parseTabular(text, forcedYear);
+}
+
+/* ---- Format 8: PER-DATE rate group booking ---------------------------------
+   28 DECEMBER 2026 – 03 JANUARY 2027
+   5 ROOMS (2 DBL + 2 TWN + 1 SGL ROOM)
+   ROOM RATE AS FOLLOWS:
+     28 DEC 2026 – SGL/DBL AED 285 BB + TD
+     29 DEC 2026 – SGL/DBL AED 285 BB + AED 225 + TD
+     ...
+   GUEST NAMES: table with ROOM TYPE column (DBL/TWN/SGL ROOM).
+   Rate per room = sum of each night's (285 + any +225) + TD (15) per night.
+---------------------------------------------------------------------------- */
+function parsePerDate(text, forcedYear) {
+  const data = { confNumber: "", company: "", rooms: [] };
+  const yearMatch = text.match(/\b(20\d{2})\b/);
+  const year = (forcedYear && String(forcedYear).trim()) || (yearMatch ? yearMatch[1] : CURRENT_YEAR);
+
+  // Company (optional greeting)
+  const greet = text.match(/(?:Greetings?|Regards?)\s+from\s+(.+)/i);
+  if (greet) data.company = greet[1].replace(/[!*:,.]+\s*$/g, "").trim();
+  const ref = (text.match(/\bRef\.?\s*:?\s*([A-Z0-9#\-\/]{4,})/i) || [])[1];
+  if (ref) data.confNumber = ref.trim();
+
+  // Overall date range: "28 DECEMBER 2026 – 03 JANUARY 2027"
+  let checkIn = "", checkOut = "", nights = 0;
+  const rangeM = text.match(/(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})\s*[–\-]\s*(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/);
+  if (rangeM) {
+    checkIn = `${ordinal(+rangeM[1])} ${monthName(rangeM[2])} ${rangeM[3]}`;
+    checkOut = `${ordinal(+rangeM[4])} ${monthName(rangeM[5])} ${rangeM[6]}`;
+  }
+
+  // Per-date rate lines inside "ROOM RATE AS FOLLOWS". Each line = one NIGHT.
+  // Sum base + any extra (e.g. +AED 225) + TD per night.
+  const TD = 15;
+  const rateSection = (text.split(/ROOM\s*RATE\s*AS\s*FOLLOWS\s*:?/i)[1] || text);
+  const nightLines = rateSection.split(/\r?\n/).filter((l) => /\b(?:AED|BB|TD)\b/i.test(l) && /\d/.test(l) && /\d{1,2}\s+[A-Za-z]{3,}/.test(l));
+  let perRoomTotal = 0, baseSum = 0, extraSum = 0, tdSum = 0, countedNights = 0;
+  for (const l of nightLines) {
+    // base: first "AED 285" ; extra: a second "AED 225" ; TD if "TD" present
+    const aedVals = [...l.matchAll(/AED\s*([\d,]+(?:\.\d+)?)/gi)].map((m) => parseFloat(m[1].replace(/,/g, "")));
+    if (!aedVals.length) continue;
+    countedNights++;
+    baseSum += aedVals[0] || 0;
+    if (aedVals.length > 1) extraSum += aedVals[1] || 0;
+    if (/\bTD\b/i.test(l)) tdSum += TD;
+  }
+  nights = countedNights || (() => { const a = parseDay(checkIn), b = parseDay(checkOut); return (a != null && b != null && b > a) ? b - a : 1; })();
+  perRoomTotal = baseSum + extraSum + tdSum;
+
+  // Guest table: rows map to rooms by the ROOM TYPE column. Collect names until a
+  // room-type label (DBL/TWN/SGL/TRP ROOM) closes a room group.
+  // Take everything after the FIRST "GUEST NAMES" occurrence (the heading), so the
+  // in-table "GUEST NAMES" column title doesn't chop the section.
+  const gIdx = text.search(/GUEST\s*NAMES?\s*:?/i);
+  let guestSection = gIdx >= 0 ? text.slice(gIdx).replace(/^GUEST\s*NAMES?\s*:?/i, "") : "";
+  // Drop a table header row like "NO.  GUEST NAMES  ROOM TYPE"
+  guestSection = guestSection.replace(/^[^\n]*\bNO\.?\b[^\n]*ROOM\s*TYPE[^\n]*\n/i, "\n");
+  const lines = guestSection.split(/\r?\n/);
+  const RT_LABEL = /\b(DBL|TWN|SGL|TRP|QUAD)\s*ROOM\b/i;
+  const RT_NAME = { DBL: "Double Room", TWN: "Twin Room", SGL: "Single Room", TRP: "Triple Room", QUAD: "Quad Room" };
+  let pending = [];
+  const cleanName = (s) => s
+    .replace(/^\s*\d+[\).\s]*/, "")
+    .replace(RT_LABEL, "")
+    .replace(/[–-]\s*\d+\s*(?:YRS?|YEARS?)\.?\s*(?:OLD)?\.?/gi, "")
+    .replace(/\(.*?\)/g, "")
+    .replace(/[.\s]+$/,"")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (/^NO\.?\b|GUEST\s*NAMES?|ROOM\s*TYPE/i.test(line) && !RT_LABEL.test(line)) continue;
+    const hasType = RT_LABEL.test(line);
+    const nm = cleanName(line);
+    if (nm && /[A-Za-z]{2,}/.test(nm)) pending.push(nm.toUpperCase());
+    if (hasType) {
+      const code = (line.match(RT_LABEL) || [])[1].toUpperCase();
+      data.rooms.push({
+        guests: pending.slice(),
+        checkIn, checkOut, nights,
+        roomType: RT_NAME[code] || "Deluxe Room",
+        meal: /\bBB\b/i.test(text) ? "BB" : (/\bRO\b/i.test(text) ? "RO" : "BB"),
+        adults: pending.length || 1, children: 0,
+        rate: 0, extra: 0,
+        _perRoomTotal: perRoomTotal, _rateBreakdown: { baseSum, extraSum, tdSum, nights },
+      });
+      pending = [];
+    }
+  }
+  // Any leftover names without a type → one Deluxe room
+  if (pending.length) {
+    data.rooms.push({ guests: pending.slice(), checkIn, checkOut, nights, roomType: "Deluxe Room",
+      meal: "BB", adults: pending.length, children: 0, rate: 0, extra: 0,
+      _perRoomTotal: perRoomTotal, _rateBreakdown: { baseSum, extraSum, tdSum, nights } });
+  }
+  if (!data.rooms.length) {
+    data.rooms.push({ guests: [], checkIn, checkOut, nights, roomType: "Deluxe Room", meal: "BB",
+      adults: 1, children: 0, rate: 0, extra: 0, _perRoomTotal: perRoomTotal, _rateBreakdown: { baseSum, extraSum, tdSum, nights } });
+  }
+  return data;
 }
 
 /* ---- Format 7: UPTOWN portal booking ---------------------------------------
@@ -867,13 +975,30 @@ function tr(label, val) { return `<tr><th>${label}</th><td>${val}</td></tr>`; }
 
 // Per-room per-night subtotal including extra bed + TD (Tourism Dirham).
 function roomPerNight(r) { return (Number(r.rate) || 0) + (Number(r.extra) || 0) + (Number(r.td) || 0); }
-function roomTotal(r) { return roomPerNight(r) * (Number(r.nights) || 0); }
+function roomTotal(r) {
+  if (r._perRoomTotal) return Number(r._perRoomTotal) || 0;   // per-date breakdown total
+  return roomPerNight(r) * (Number(r.nights) || 0);
+}
+
+// Build the itemized rate lines for a per-date breakdown (base / peak extra / TD).
+function breakdownLines(r) {
+  const b = r._rateBreakdown || {};
+  const n = b.nights || r.nights || 0;
+  const lines = [];
+  if (b.baseSum) lines.push(`Room: AED ${num(b.baseSum)} (${n} ${n === 1 ? "night" : "nights"})`);
+  if (b.extraSum) lines.push(`Peak supplement: AED ${num(b.extraSum)}`);
+  if (b.tdSum) lines.push(`TD: AED ${num(b.tdSum)}`);
+  return lines;
+}
 
 function rateHtml(r) {
+  if (r._rateBreakdown) {
+    const lines = breakdownLines(r).map((l) => `<span class="rate-line">${esc(l)}</span>`).join("");
+    return lines + `<span class="rate-line rate-total">Total = AED ${num(roomTotal(r))}</span>`;
+  }
   const nightWord = r.nights === 1 ? "NIGHT" : "NIGHTS";
   const td = Number(r.td) || 0;
   const extra = Number(r.extra) || 0;
-  // Build the "base (+ extra) (+ TD) X nights" formula line.
   let parts = [num(r.rate)];
   if (extra > 0) parts.push(num(extra));
   if (td > 0) parts.push(`${num(td)} TD`);
@@ -993,6 +1118,10 @@ function trE(label, val) {
 }
 
 function rateEmail(r) {
+  if (r._rateBreakdown) {
+    const lines = breakdownLines(r).map(esc).join("<br>");
+    return `${lines}<br><strong>Total = AED ${num(roomTotal(r))}</strong>`;
+  }
   const nightWord = r.nights === 1 ? "NIGHT" : "NIGHTS";
   const extra = Number(r.extra) || 0, td = Number(r.td) || 0;
   let parts = [num(r.rate)];
