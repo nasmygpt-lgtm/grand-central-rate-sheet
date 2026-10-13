@@ -84,6 +84,12 @@ function parseBooking(text, forcedYear) {
   ].filter((re) => re.test(text)).length;
   if (pmsHits >= 2) return parsePms(text, forcedYear);
 
+  // "Uptown" portal format: Booking Reference Number, Lead Guest Name, Meal Type,
+  // "Deluxe Room = 135- 5% = 128.25 AED", "128.25 * 1 Night = 128.25".
+  const looksUptown = /Lead\s*Guest\s*Name/i.test(text) ||
+    (/Booking\s*Reference/i.test(text) && /Meal\s*Type\s*:/i.test(text));
+  if (looksUptown) return parseUptown(text, forcedYear);
+
   // "Group colon-labelled" format (e.g. Bedouin Trips): BOOKING REF :, HOTEL :, NAME :,
   // CHECK IN :, CHECK OUT :, Number of rooms :, Rate :, TD FEE :.
   const looksGroupLabeled = /Number\s*of\s*rooms?\s*:/i.test(text) &&
@@ -108,6 +114,111 @@ function parseBooking(text, forcedYear) {
   if (looksLabeled) return parseLabeled(text, forcedYear);
 
   return parseTabular(text, forcedYear);
+}
+
+/* ---- Format 7: UPTOWN portal booking ---------------------------------------
+   Greetings From Uptown Vacations-LLC-FZ
+   Booking Reference Number : UV261013190531859
+   Check In : 17th October 2026 | Check Out : 18th October 2026
+   Deluxe Room = 135- 5% = 128.25 AED     (final per-night rate = 128.25)
+   Meal Type : RO
+   Lead Guest Name : Mahesh / Shetye * 2 Adults
+   128.25 * 1 Night = 128.25 | Total = 128.25 AED
+   Supports multiple "Room N" blocks.
+---------------------------------------------------------------------------- */
+function parseUptown(text, forcedYear) {
+  const data = { confNumber: "", company: "", rooms: [] };
+  const yearMatch = text.match(/\b(20\d{2})\b/);
+  const year = (forcedYear && String(forcedYear).trim()) || (yearMatch ? yearMatch[1] : CURRENT_YEAR);
+  const grab = (re) => { const m = text.match(re); return m ? m[1].trim() : ""; };
+
+  // Company
+  const greet = text.match(/(?:Greetings?|Regards?)\s+from\s+(.+)/i);
+  if (greet) data.company = greet[1].replace(/[!*:,.]+\s*$/g, "").trim();
+
+  // Booking reference
+  const ref = grab(/Booking\s*Reference(?:\s*Number)?\s*:?\s*([A-Za-z0-9\-\/]+)/i);
+  if (ref) data.confNumber = ref;
+
+  // Shared check-in / check-out (apply to all rooms unless a room overrides)
+  const ciShared = grab(/Check\s*In\s*:?\s*([0-9]{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4}|[0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})/i);
+  const coShared = grab(/Check\s*Out\s*:?\s*([0-9]{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4}|[0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})/i);
+  const normUp = (s) => {
+    if (!s) return "";
+    let m = s.match(/([0-9]{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\s+(\d{4})/);
+    if (m) return `${ordinal(+m[1])} ${monthName(m[2])} ${m[3]}`;
+    return formatDate(s, year);
+  };
+  const checkInShared = normUp(ciShared);
+  const checkOutShared = normUp(coShared);
+
+  // Shared meal type
+  let meal = (grab(/Meal\s*Type\s*:?\s*([A-Za-z]{2,4})/i) || "").toUpperCase() || "RO";
+
+  // Determine the per-night rate / room-type info from the HEADER (shared across rooms when
+  // not repeated inside each room block).
+  const sharedRateLine = text.match(/(?:Deluxe|Standard|Superior|Suite|Room)[^\n=]*=\s*[^=\n]*=\s*([\d,]+(?:\.\d+)?)\s*AED/i)
+    || text.match(/=\s*([\d,]+(?:\.\d+)?)\s*AED/i);
+  const sharedRate = sharedRateLine ? parseFloat(sharedRateLine[1].replace(/,/g, "")) : 0;
+
+  // Split into "Room N" blocks. Each real block starts at a "Room <n>" marker; drop the
+  // header text that appears BEFORE the first "Room 1".
+  const hasRoomMarkers = /\bRoom\s*\d+\b/i.test(text);
+  let useBlocks;
+  if (hasRoomMarkers) {
+    useBlocks = text.split(/(?=\bRoom\s*\d+\b)/i).filter((b) => /^\s*Room\s*\d+\b/i.test(b));
+  } else {
+    useBlocks = [text];
+  }
+
+  for (const blk of useBlocks) {
+    // Guest: "Lead Guest Name : Mahesh / Shetye * 2 Adults"
+    let guestRaw = (blk.match(/Lead\s*Guest\s*Name\s*:?\s*([^\n\r]+)/i) || [])[1]
+      || (blk.match(/Guest\s*Name\s*:?\s*([^\n\r]+)/i) || [])[1] || "";
+    let adults = 0;
+    const adM = guestRaw.match(/\*?\s*(\d+)\s*Adults?/i); if (adM) adults = parseInt(adM[1], 10);
+    const guest = guestRaw
+      .replace(/\*.*$/,"")                 // drop "* 2 Adults"
+      .replace(/\s{2,}/g, " ")
+      .trim();
+
+    // Rate: prefer the final value after "=" in "Deluxe Room = 135- 5% = 128.25 AED",
+    // else the per-night value in "128.25 * 1 Night = 128.25", else the shared header rate.
+    let rate = 0;
+    const rtLine = blk.match(/(?:Deluxe|Standard|Superior|Suite|Room)[^\n=]*=\s*[^=\n]*=\s*([\d,]+(?:\.\d+)?)\s*AED/i)
+      || blk.match(/=\s*([\d,]+(?:\.\d+)?)\s*AED/i);
+    if (rtLine) rate = parseFloat(rtLine[1].replace(/,/g, ""));
+    const perNight = blk.match(/([\d,]+(?:\.\d+)?)\s*\*\s*(\d+)\s*Nights?/i);
+    let nights = 0;
+    if (perNight) { if (!rate) rate = parseFloat(perNight[1].replace(/,/g, "")); nights = parseInt(perNight[2], 10); }
+    if (!rate) rate = sharedRate;
+
+    // Dates: block-specific if present, else shared
+    const ciB = normUp((blk.match(/Check\s*In\s*:?\s*([0-9]{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4})/i) || [])[1] || "");
+    const coB = normUp((blk.match(/Check\s*Out\s*:?\s*([0-9]{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4})/i) || [])[1] || "");
+    const checkIn = ciB || checkInShared;
+    const checkOut = coB || checkOutShared;
+    if (!nights) { const a = parseDay(checkIn), b = parseDay(checkOut); if (a != null && b != null && b > a) nights = b - a; }
+
+    // room type — default Deluxe Room (per instruction)
+    const roomType = "Deluxe Room";
+
+    // Skip empty blocks (no guest and no rate)
+    if (!guest && !rate && !checkIn) continue;
+
+    data.rooms.push({
+      guests: guest ? [guest.toUpperCase()] : [],
+      checkIn, checkOut, nights: nights || 1,
+      roomType, meal,
+      adults: adults || 2, children: 0,
+      rate, extra: 0,
+    });
+  }
+
+  if (!data.rooms.length) {
+    data.rooms.push({ guests: [], checkIn: checkInShared, checkOut: checkOutShared, nights: 1, roomType: "Deluxe Room", meal, adults: 2, children: 0, rate: 0, extra: 0 });
+  }
+  return data;
 }
 
 /* ---- Format 6: PMS reservation screen (GCH-style screenshot) ----------------
