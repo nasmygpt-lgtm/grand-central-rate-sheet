@@ -96,6 +96,13 @@ function parseBooking(text, forcedYear) {
     /CHECK\s*IN\s*:/i.test(text) && /\bRate\b\s*:/i.test(text);
   if (looksGroupLabeled) return parseGroupLabeled(text, forcedYear);
 
+  // "Room-count by type" format: lines like "05 Twin Room with BB" / "06 Double Occupancy",
+  // a confirm-N-rooms line, Check in/out, and a single "Rate : AED 280" (no guest names here).
+  const looksRoomCounts = /\b\d{1,2}\s+(?:Twin|Double|Single|Triple|Twin\s*Room|Double\s*Occupancy|Dbl|Twn|Sgl)/i.test(text) &&
+    /confirm\s+\d{1,2}\s+Rooms?/i.test(text) && /\bRate\b\s*:/i.test(text) &&
+    !/GUEST\s*NAMES?/i.test(text);
+  if (looksRoomCounts) return parseRoomCounts(text, forcedYear);
+
   // "Per-date rate" group format: a "ROOM RATE AS FOLLOWS" block with one line per date,
   // and a GUEST NAMES table with DBL/TWN/SGL ROOM types.
   const looksPerDate = /ROOM\s*RATE\s*AS\s*FOLLOWS/i.test(text) ||
@@ -120,6 +127,78 @@ function parseBooking(text, forcedYear) {
   if (looksLabeled) return parseLabeled(text, forcedYear);
 
   return parseTabular(text, forcedYear);
+}
+
+/* ---- Format 9: ROOM-COUNT by type (no guest names) -------------------------
+   "please confirm 11 Rooms as per the below"
+   Check in : 09 Nov | Check out : 11 Nov
+   05 Twin Room with BB | 06 Double Occupancy with BB
+   Rate : Aed 280 incl TD   (TD already included → no extra TD added)
+   Produces one summary row per room-type group with its count & total.
+---------------------------------------------------------------------------- */
+function parseRoomCounts(text, forcedYear) {
+  const data = { confNumber: "", company: "", rooms: [] };
+  const yearMatch = text.match(/\b(20\d{2})\b/);
+  const year = (forcedYear && String(forcedYear).trim()) || (yearMatch ? yearMatch[1] : CURRENT_YEAR);
+
+  const greet = text.match(/(?:Greetings?|Regards?)\s+from\s+(.+)/i);
+  if (greet) data.company = greet[1].replace(/[!*:,.]+\s*$/g, "").trim();
+  const ref = (text.match(/\bRef\.?\s*:?\s*([A-Z0-9#\-\/]{4,})/i) || [])[1];
+  if (ref) data.confNumber = ref.trim();
+
+  // Dates: "Check in : 09 Nov" / "Check out : 11 Nov" (year optional → use forced/CURRENT)
+  const dOne = (lbl) => {
+    const m = text.match(new RegExp(lbl + "\\s*:?\\s*([0-9]{1,2})\\s*([A-Za-z]{3,9})?\\s*(\\d{4})?", "i"));
+    if (!m) return "";
+    const day = +m[1], mon = m[2] ? monthName(m[2]) : "", yr = m[3] || year;
+    return mon ? `${ordinal(day)} ${mon} ${yr}` : "";
+  };
+  let checkIn = dOne("Check\\s*in"), checkOut = dOne("Check\\s*out");
+  // If check-out had no month, inherit check-in's month
+  if (checkOut && !/[A-Za-z]/.test(checkOut)) checkOut = "";
+  let nights = 0;
+  { const a = parseDay(checkIn), b = parseDay(checkOut); if (a != null && b != null && b > a) nights = b - a; }
+
+  // Meal
+  let meal = "BB";
+  const mealM = text.match(/\bwith\s+(BB|HB|FB|RO|AI)\b/i) || text.match(/\b(BB|HB|FB|RO|AI)\b/i);
+  if (mealM) meal = mealM[1].toUpperCase();
+
+  // Rate: "Rate : Aed 280 incl TD"  → 280 already INCLUDES TD (don't add 15).
+  const rateM = text.match(/Rate\s*:?\s*(?:AED)?\s*([\d,]+(?:\.\d+)?)/i);
+  const rate = rateM ? parseFloat(rateM[1].replace(/,/g, "")) : 0;
+  const tdIncluded = /incl\.?\s*TD|include[sd]?\s*TD|TD\s*incl/i.test(text);
+  // If TD is NOT included but is mentioned with "+ TD", add 15; here it IS included → td 0.
+  const td = (!tdIncluded && /\+\s*TD\b/i.test(text)) ? 15 : 0;
+
+  // Room-type count lines: "05 Twin Room with BB", "06 Double Occupancy with BB"
+  const TYPE_RE = /\b(\d{1,2})\s+((?:Twin|Double|Single|Triple|Quad)(?:\s*Occupancy|\s*Room)?)\b/gi;
+  let m, total = 0;
+  const groups = [];
+  while ((m = TYPE_RE.exec(text)) !== null) {
+    const count = parseInt(m[1], 10);
+    let typeWord = m[2].replace(/Occupancy/i, "").replace(/Room/i, "").trim();
+    const RT = { Twin: "Twin Room", Double: "Double Room", Single: "Single Room", Triple: "Triple Room", Quad: "Quad Room" };
+    const roomType = RT[titleCase(typeWord)] || "Deluxe Room";
+    groups.push({ count, roomType });
+  }
+
+  for (const g of groups) {
+    data.rooms.push({
+      guests: [],
+      checkIn, checkOut, nights: nights || 1,
+      roomType: g.roomType, meal,
+      adults: g.roomType === "Single Room" ? 1 : 2, children: 0,
+      rate, extra: 0, td,
+      _group: true, _roomCount: g.count,
+    });
+  }
+  if (!data.rooms.length) {
+    const rc = parseInt((text.match(/confirm\s+(\d{1,2})\s+Rooms?/i) || [])[1] || "1", 10);
+    data.rooms.push({ guests: [], checkIn, checkOut, nights: nights || 1, roomType: "Deluxe Room", meal,
+      adults: 2, children: 0, rate, extra: 0, td, _group: true, _roomCount: rc });
+  }
+  return data;
 }
 
 /* ---- Format 8: PER-DATE rate group booking ---------------------------------
@@ -1024,17 +1103,20 @@ function render(data, nonRefundable) {
 
   let tables;
   if (isGroup) {
-    const r = data.rooms[0];
-    const roomCount = r._roomCount || data.rooms.length;
-    const guest = (r.guests[0] || "").toUpperCase();
-    const nightsLabel = `${r.nights} ${r.nights === 1 ? "Night" : "Nights"}`;
-    grand = roomTotal(r) * roomCount;
-    const tdLabel = (Number(r.td) || 0) > 0 ? `AED ${num(r.td)} per room per night (Tourism Dirham)` : "Direct payment";
-    tables = `
+    const groupMulti = data.rooms.length > 1;
+    tables = data.rooms.map((r, gi) => {
+      const roomCount = r._roomCount || 1;
+      const guest = (r.guests[0] || "").toUpperCase();
+      const nightsLabel = `${r.nights} ${r.nights === 1 ? "Night" : "Nights"}`;
+      const roomsTotal = roomTotal(r) * roomCount;
+      grand += roomsTotal;
+      const tdLabel = (Number(r.td) || 0) > 0 ? `AED ${num(r.td)} per room per night (Tourism Dirham)` : "Direct payment";
+      const header = groupMulti ? `<div class="room-header">${esc(r.roomType)} — ${roomCount} Room${roomCount > 1 ? "s" : ""}</div>` : "";
+      return `${header}
       <table>
-        ${tr("Hotel Confirmation", esc(data.confNumber))}
-        ${data.company ? tr("Company Name", esc(data.company.toUpperCase())) : ""}
-        ${tr("Guest Name", esc(guest))}
+        ${gi === 0 ? tr("Hotel Confirmation", esc(data.confNumber)) : ""}
+        ${gi === 0 && data.company ? tr("Company Name", esc(data.company.toUpperCase())) : ""}
+        ${guest ? tr("Guest Name", esc(guest)) : ""}
         ${tr("Check In", esc(r.checkIn))}
         ${tr("Check Out", esc(r.checkOut))}
         ${tr("Duration of Stay", nightsLabel)}
@@ -1042,9 +1124,10 @@ function render(data, nonRefundable) {
         ${tr("Room Type", esc(r.roomType))}
         ${tr("Meal Plan", esc(r.meal))}
         ${tr("Rate per Night", rateHtml(r))}
-        ${tr("Rooms Total", `<span class="rate-total">${num(roomTotal(r))} X ${roomCount} ROOMS = AED ${num(grand)}</span>`)}
+        ${tr("Rooms Total", `<span class="rate-total">${num(roomTotal(r))} X ${roomCount} ROOMS = AED ${num(roomsTotal)}</span>`)}
         ${tr("TD", `<span class="td-badge">${esc(tdLabel)}</span>`)}
       </table>`;
+    }).join("");
   } else {
     tables = data.rooms.map((r, i) => {
       grand += roomTotal(r);
@@ -1145,17 +1228,20 @@ function renderEmail(data, nonRefundable) {
 
   let tables;
   if (isGroup) {
-    const r = data.rooms[0];
-    const roomCount = r._roomCount || data.rooms.length;
-    const guest = (r.guests[0] || "").toUpperCase();
-    const nightsLabel = `${r.nights} ${r.nights === 1 ? "Night" : "Nights"}`;
-    grand = roomTotal(r) * roomCount;
-    const tdLabel = (Number(r.td) || 0) > 0 ? `AED ${num(r.td)} per room per night (Tourism Dirham)` : "Direct payment";
-    tables = `
+    const groupMulti = data.rooms.length > 1;
+    tables = data.rooms.map((r, gi) => {
+      const roomCount = r._roomCount || 1;
+      const guest = (r.guests[0] || "").toUpperCase();
+      const nightsLabel = `${r.nights} ${r.nights === 1 ? "Night" : "Nights"}`;
+      const roomsTotal = roomTotal(r) * roomCount;
+      grand += roomsTotal;
+      const tdLabel = (Number(r.td) || 0) > 0 ? `AED ${num(r.td)} per room per night (Tourism Dirham)` : "Direct payment";
+      const header = groupMulti ? `<div style="${S.roomHeader}">${esc(r.roomType)} — ${roomCount} Room${roomCount > 1 ? "s" : ""}</div>` : "";
+      return `${header}
       <table style="${S.table}" cellpadding="0" cellspacing="0" border="1">
-        ${trE("Hotel Confirmation", esc(data.confNumber))}
-        ${data.company ? trE("Company Name", esc(data.company.toUpperCase())) : ""}
-        ${trE("Guest Name", esc(guest))}
+        ${gi === 0 ? trE("Hotel Confirmation", esc(data.confNumber)) : ""}
+        ${gi === 0 && data.company ? trE("Company Name", esc(data.company.toUpperCase())) : ""}
+        ${guest ? trE("Guest Name", esc(guest)) : ""}
         ${trE("Check In", esc(r.checkIn))}
         ${trE("Check Out", esc(r.checkOut))}
         ${trE("Duration of Stay", nightsLabel)}
@@ -1163,9 +1249,10 @@ function renderEmail(data, nonRefundable) {
         ${trE("Room Type", esc(r.roomType))}
         ${trE("Meal Plan", esc(r.meal))}
         ${trE("Rate per Night", rateEmail(r))}
-        ${trE("Rooms Total", `<strong>${num(roomTotal(r))} X ${roomCount} ROOMS = AED ${num(grand)}</strong>`)}
+        ${trE("Rooms Total", `<strong>${num(roomTotal(r))} X ${roomCount} ROOMS = AED ${num(roomsTotal)}</strong>`)}
         ${trE("TD", `<span style="${S.badge}">${esc(tdLabel)}</span>`)}
       </table>`;
+    }).join("");
   } else {
     tables = data.rooms.map((r, i) => {
       grand += roomTotal(r);
