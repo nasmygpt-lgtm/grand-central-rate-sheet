@@ -183,21 +183,26 @@ function parseRoomCounts(text, forcedYear) {
     groups.push({ count, roomType });
   }
 
-  for (const g of groups) {
-    data.rooms.push({
-      guests: [],
-      checkIn, checkOut, nights: nights || 1,
-      roomType: g.roomType, meal,
-      adults: g.roomType === "Single Room" ? 1 : 2, children: 0,
-      rate, extra: 0, td,
-      _group: true, _roomCount: g.count,
-    });
-  }
-  if (!data.rooms.length) {
-    const rc = parseInt((text.match(/confirm\s+(\d{1,2})\s+Rooms?/i) || [])[1] || "1", 10);
-    data.rooms.push({ guests: [], checkIn, checkOut, nights: nights || 1, roomType: "Deluxe Room", meal,
-      adults: 2, children: 0, rate, extra: 0, td, _group: true, _roomCount: rc });
-  }
+  // Combine all room-type groups into ONE summary row with the TOTAL room count
+  // (show the total number of rooms together, not separate Twin/Double tables).
+  const totalRooms = groups.reduce((s, g) => s + g.count, 0);
+  // Prefer the stated "confirm N Rooms" count if present and it matches/greater.
+  const statedRooms = parseInt((text.match(/confirm\s+(\d{1,2})\s+Rooms?/i) || [])[1] || "0", 10);
+  const roomCount = totalRooms || statedRooms || 1;
+  // Combined room-type label, e.g. "Twin / Double Room"
+  const typeLabel = groups.length
+    ? groups.map((g) => g.roomType.replace(/\s*Room$/i, "")).join(" / ") + " Room"
+    : "Deluxe Room";
+
+  data.rooms.push({
+    guests: [],
+    checkIn, checkOut, nights: nights || 1,
+    roomType: groups.length ? typeLabel : "Deluxe Room",
+    meal,
+    adults: 2, children: 0,
+    rate, extra: 0, td,
+    _group: true, _roomCount: roomCount,
+  });
   return data;
 }
 
@@ -1095,9 +1100,9 @@ function rateHtml(r) {
 }
 
 function render(data, nonRefundable) {
-  // A "group" booking (many identical rooms) is shown as ONE summary table + a total,
-  // instead of printing 17 identical tables.
-  const isGroup = data.rooms.length > 1 && data.rooms.every((r) => r._group) ;
+  // A "group" booking (many rooms represented by counts) is shown as summary table(s) with
+  // a No. of Rooms + Rooms Total — not one table per physical room.
+  const isGroup = data.rooms.length >= 1 && data.rooms.every((r) => r._group);
   const multi = data.rooms.length > 1 && !isGroup;
   let grand = 0;
 
@@ -1222,7 +1227,7 @@ function rateEmail(r) {
 }
 
 function renderEmail(data, nonRefundable) {
-  const isGroup = data.rooms.length > 1 && data.rooms.every((r) => r._group);
+  const isGroup = data.rooms.length >= 1 && data.rooms.every((r) => r._group);
   const multi = data.rooms.length > 1 && !isGroup;
   let grand = 0;
 
